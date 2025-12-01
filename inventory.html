@@ -234,8 +234,27 @@
                 console.error("Logs Snapshot Error:", error);
             });
         }
+
+        // 輔助函式：安全檢查錯誤是否為權限問題
+        function isPermissionError(err) {
+            // 確保 err.message 存在且是字串，避免 TypeError
+            const message = err?.message || ''; 
+            return err?.name === 'NotAllowedError' || message.includes('permission');
+        }
+
+        // 輔助函式：集中處理最終的相機啟動錯誤
+        function handleFinalCameraError(err, scannerText) {
+            console.error("Camera startup final error:", err);
+            if (isPermissionError(err)) {
+                if (scannerText) scannerText.innerText = "🚨 啟動失敗：請授予相機權限。";
+                setFlashMessage("🚨 啟動失敗：請授予相機權限。", false);
+            } else {
+                if (scannerText) scannerText.innerText = `🚨 相機啟動發生錯誤: ${err.name || '未知錯誤'}。請檢查設備。`;
+                setFlashMessage("🚨 相機啟動發生錯誤。", false);
+            }
+        }
         
-        // --- 5. 掃描器控制 (重新編寫：單純開啟後鏡頭，提高啟動速度) ---
+        // --- 5. 掃描器控制 (重新編寫：單純開啟後鏡頭，並加入備援) ---
         async function startCamera() {
             if (typeof window.Html5Qrcode === 'undefined') {
                 setFlashMessage("QR 掃描庫載入中，請稍候...");
@@ -249,7 +268,7 @@
             }
 
             const scannerText = document.querySelector('#scanner-container p');
-            if (scannerText) scannerText.innerText = "正在啟動相機 (最快速模式)...";
+            if (scannerText) scannerText.innerText = "正在啟動相機 (嘗試後置鏡頭)...";
 
             // 設置掃描框大小 (不影響啟動速度)
             const qrboxFunction = (viewfinderWidth, viewfinderHeight) => {
@@ -260,27 +279,43 @@
 
             const config = { fps: 10, qrbox: qrboxFunction };
 
+            const onScanSuccess = (decodedText) => { vibrate([50]); fetchItemData(decodedText); };
+            const onScanError = (errorMessage) => { /* 忽略詳細錯誤訊息以保持控制台清潔 */ };
+
+            // --- 嘗試 1: 後置鏡頭 (environment) ---
             try {
-                // 僅使用 facingMode: "environment" (後置鏡頭) 啟動，避免複雜的設備檢查和高解析度協商
                 await html5QrCode.start(
-                    { facingMode: "environment" }, // 優先使用後置鏡頭，最簡潔的啟動參數
-                    config, 
-                    (decodedText) => { vibrate([50]); fetchItemData(decodedText); },
-                    (errorMessage) => { /* 忽略詳細錯誤訊息以保持控制台清潔 */ }
+                    { facingMode: "environment" }, // 優先使用後置鏡頭
+                    config, onScanSuccess, onScanError
                 );
-                
                 if (scannerText) scannerText.innerText = "相機已啟動，請對準 QR Code";
+                return; // 成功啟動，直接返回
             } catch (err) {
-                console.error("Camera startup error:", err);
-                if (err.name === 'NotAllowedError' || err.message.includes('permission')) {
-                     if (scannerText) scannerText.innerText = "🚨 啟動失敗：請授予相機權限。";
-                     setFlashMessage("🚨 啟動失敗：請授予相機權限。", false);
-                } else {
-                    if (scannerText) scannerText.innerText = "🚨 相機啟動發生未知錯誤。";
-                    setFlashMessage("🚨 相機啟動發生錯誤。", false);
+                // 如果是權限問題，則停止嘗試，因為 fallback 也會失敗
+                if (isPermissionError(err)) {
+                    handleFinalCameraError(err, scannerText);
+                    return;
                 }
+                // 如果是 NotFoundError 或其他設備相關錯誤，則進行嘗試 2
+                console.warn("Attempt 1 (environment) failed, trying fallback:", err);
+            }
+
+            // --- 嘗試 2: 任意可用鏡頭 (fallback) ---
+            try {
+                if (scannerText) scannerText.innerText = "後置鏡頭找不到，嘗試任意鏡頭...";
+                // 使用空物件 {} 或 true，讓瀏覽器選擇任何可用的相機
+                await html5QrCode.start(
+                    {}, 
+                    config, onScanSuccess, onScanError
+                );
+                if (scannerText) scannerText.innerText = "相機已啟動 (Fallback)，請對準 QR Code";
+                return; // 成功啟動，直接返回
+            } catch (err) {
+                // 最終錯誤處理
+                handleFinalCameraError(err, scannerText);
             }
         }
+
 
         function stopCamera() {
             if (html5QrCode && html5QrCode.isScanning) {
