@@ -31,6 +31,7 @@
         // 應用程式狀態
         let currentItem = { id: null, name: '', qty: 0, location: '' };
         let allInventoryData = [];
+        let currentView = 'scan';
 
         // 輔助函式
         const formatTimestamp = (timestamp) => {
@@ -477,8 +478,18 @@
         
         // --- 9. 輔助功能 ---
         window.switchView = function(view) {
+            currentView = view; // 更新當前視圖狀態
+            const mainContent = document.getElementById('main-content-scroll');
             const views = { 'scan': 'view-scan', 'list': 'view-list', 'logs': 'view-logs', 'create': 'view-create' };
-            // mainContent 已經被設定為 overflow-y-auto
+            
+            // FIX 1: 根據視圖切換主內容區塊的捲動設定
+            if (view === 'scan') {
+                mainContent.classList.add('overflow-hidden'); // 鎖定掃描頁面不捲動
+                mainContent.classList.remove('overflow-y-auto');
+            } else {
+                mainContent.classList.add('overflow-y-auto');
+                mainContent.classList.remove('overflow-hidden');
+            }
 
             Object.keys(views).forEach(v => {
                 document.getElementById(views[v]).classList.add('hidden');
@@ -537,7 +548,7 @@
             const header = ["商品編號 (ID)", "品名", "庫存數量", "存放位置", "最後入庫日", "更新時間"].join(',');
             const csvRows = allInventoryData.map(item => {
                 const lastInbound = item.lastInboundDate ? formatTimestamp(item.lastInboundDate) : '';
-                const updatedAt = item.updatedAt ? formatTimestamp(item.updatedAt) : '';
+                const updatedAt = item.updatedAt ? formatTimestamp(item.updatedDate) : '';
                 return [
                     `"${item.id}"`,
                     `"${item.name || '未命名'}"`,
@@ -617,65 +628,73 @@
     <main id="main-content-scroll" class="flex-grow overflow-y-auto">
         
         <!-- 1. 掃描頁面 (預設顯示) -->
-        <div id="view-scan" class="p-4 space-y-4">
-            <div class="bg-white rounded-xl shadow-lg overflow-hidden border-4 border-indigo-500/50">
-                <div id="scanner-container" class="w-full h-64 bg-gray-900 flex items-center justify-center text-white text-lg">
-                    <p>正在啟動相機...</p>
-                </div>
-            </div>
-
-            <div class="bg-white p-5 rounded-xl shadow-xl space-y-4">
-                <p class="text-center font-mono text-xs text-gray-500 truncate"><span class='font-bold text-gray-700'>ID:</span> <span id="res-id">---</span></p>
-                
-                <input 
-                    type="text" 
-                    id="res-name" 
-                    onchange="handleNameUpdate()"
-                    placeholder="請先掃描商品"
-                    class="w-full p-3 border-2 border-gray-300 rounded-lg text-center font-bold text-lg focus:border-indigo-500 transition"
-                />
-
-                <div class="flex justify-between items-center bg-indigo-50 p-4 rounded-xl">
-                    <span class="text-lg text-indigo-700 font-semibold">目前庫存:</span>
-                    <span id="res-qty" class="text-4xl font-extrabold text-indigo-600 transition-transform duration-300">0</span>
+        <!-- FIX 1: 確保 h-full flex flex-col 佔滿父容器的可用高度 -->
+        <div id="view-scan" class="h-full flex flex-col justify-start">
+            
+            <!-- FIX 2: 使用 flex-shrink-0 確保此區塊在掃描頁面不被壓縮 -->
+            <div class="p-2 space-y-2 flex-shrink-0 h-full flex flex-col">
+                <!-- 相機容器：使用 flex-grow 佔滿所有剩餘垂直空間 -->
+                <div class="bg-white rounded-xl shadow-lg overflow-hidden border-4 border-indigo-500/50 flex-grow min-h-[100px] max-h-full">
+                    <div id="scanner-container" class="w-full h-full bg-gray-900 flex items-center justify-center text-white text-lg">
+                        <p>正在啟動相機...</p>
+                    </div>
                 </div>
 
-                <div class="bg-gray-100 p-4 rounded-xl space-y-3">
-                    <label class="text-sm font-semibold text-gray-700 block">異動數量:</label>
+                <!-- FIX 4: 壓縮內邊距和字體大小，減少垂直空間佔用 -->
+                <div class="bg-white p-3 rounded-xl shadow-xl space-y-2 flex-shrink-0 mt-2">
+                    <p class="text-center font-mono text-xs text-gray-500 truncate"><span class='font-bold text-gray-700'>ID:</span> <span id="res-id">---</span></p>
                     
-                    <div class="flex gap-2">
-                        <input 
-                            type="number" 
-                            id="op-amount" 
-                            value="1" 
-                            min="1" 
-                            inputmode="numeric"
-                            class="flex-grow p-3 border-2 border-gray-300 rounded-lg text-center font-semibold text-xl"
-                        />
-                        <button 
-                            onclick="fillMaxStock()"
-                            class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 text-sm flex-shrink-0"
-                        >
-                            填入庫存
-                        </button>
+                    <input 
+                        type="text" 
+                        id="res-name" 
+                        onchange="handleNameUpdate()"
+                        placeholder="請先掃描商品"
+                        class="w-full p-1.5 border-2 border-gray-300 rounded-lg text-center font-bold text-sm focus:border-indigo-500 transition"
+                    />
+
+                    <div class="flex justify-between items-center bg-indigo-50 p-2 rounded-xl">
+                        <span class="text-sm text-indigo-700 font-semibold">目前庫存:</span>
+                        <span id="res-qty" class="text-2xl font-extrabold text-indigo-600 transition-transform duration-300">0</span>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-4 pt-2">
-                        <button 
-                            onclick="handleStock(1)"
-                            class="bg-green-500 hover:bg-green-600 text-white font-extrabold py-4 rounded-xl shadow-md transition transform hover:scale-[1.02]"
-                        >
-                            <span class="text-2xl">+</span> 入庫
-                        </button>
-                        <button 
-                            onclick="handleStock(-1)"
-                            class="bg-red-500 hover:bg-red-600 text-white font-extrabold py-4 rounded-xl shadow-md transition transform hover:scale-[1.02]"
-                        >
-                            <span class="text-2xl">-</span> 出庫
-                        </button>
+                    <div class="bg-gray-100 p-2 rounded-xl space-y-1">
+                        <label class="text-xs font-semibold text-gray-700 block">異動數量:</label>
+                        
+                        <div class="flex gap-2">
+                            <input 
+                                type="number" 
+                                id="op-amount" 
+                                value="1" 
+                                min="1" 
+                                inputmode="numeric"
+                                class="flex-grow p-1.5 border-2 border-gray-300 rounded-lg text-center font-semibold text-base"
+                            />
+                            <button 
+                                onclick="fillMaxStock()"
+                                class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-1 px-2 rounded-lg shadow transition duration-150 text-xs flex-shrink-0"
+                            >
+                                填入庫存
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 pt-1">
+                            <button 
+                                onclick="handleStock(1)"
+                                class="bg-green-500 hover:bg-green-600 text-white font-extrabold py-2.5 rounded-xl shadow-md transition transform hover:scale-[1.01] text-sm"
+                            >
+                                <span class="text-xl">+</span> 入庫
+                            </button>
+                            <button 
+                                onclick="handleStock(-1)"
+                                class="bg-red-500 hover:bg-red-600 text-white font-extrabold py-2.5 rounded-xl shadow-md transition transform hover:scale-[1.01] text-sm"
+                            >
+                                <span class="text-xl">-</span> 出庫
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
+            
         </div>
 
         <!-- 2. 庫存列表頁面 -->
