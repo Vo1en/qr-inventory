@@ -254,7 +254,7 @@
             }
         }
         
-        // --- 5. 掃描器控制 (重新編寫：單純開啟後鏡頭，並加入備援) ---
+        // --- 5. 掃描器控制 (優化: 繞過 facingMode 協商，直接使用 Device ID 啟動) ---
         async function startCamera() {
             if (typeof window.Html5Qrcode === 'undefined') {
                 setFlashMessage("QR 掃描庫載入中，請稍候...");
@@ -268,9 +268,8 @@
             }
 
             const scannerText = document.querySelector('#scanner-container p');
-            if (scannerText) scannerText.innerText = "正在啟動相機 (嘗試後置鏡頭)...";
+            if (scannerText) scannerText.innerText = "正在偵測相機設備...";
 
-            // 設置掃描框大小 (不影響啟動速度)
             const qrboxFunction = (viewfinderWidth, viewfinderHeight) => {
                 let minEdge = Math.min(viewfinderWidth, viewfinderHeight);
                 let size = Math.floor(minEdge * 0.7);
@@ -281,35 +280,46 @@
 
             const onScanSuccess = (decodedText) => { vibrate([50]); fetchItemData(decodedText); };
             const onScanError = (errorMessage) => { /* 忽略詳細錯誤訊息以保持控制台清潔 */ };
-
-            // --- 嘗試 1: 後置鏡頭 (environment) ---
+            
             try {
-                await html5QrCode.start(
-                    { facingMode: "environment" }, // 優先使用後置鏡頭
-                    config, onScanSuccess, onScanError
-                );
-                if (scannerText) scannerText.innerText = "相機已啟動，請對準 QR Code";
-                return; // 成功啟動，直接返回
-            } catch (err) {
-                // 如果是權限問題，則停止嘗試，因為 fallback 也會失敗
-                if (isPermissionError(err)) {
-                    handleFinalCameraError(err, scannerText);
-                    return;
+                const devices = await window.Html5Qrcode.getCameras();
+                let targetId = null;
+                let targetLabel = 'Default Camera';
+
+                if (devices && devices.length) {
+                    // 1. 優先選擇後置鏡頭 (包含 'back', 'environment' 等關鍵字)
+                    const environmentCam = devices.find(d => 
+                        d.label.toLowerCase().includes('back') || 
+                        d.label.toLowerCase().includes('environment')
+                    );
+                    
+                    if (environmentCam) {
+                        targetId = environmentCam.id;
+                        targetLabel = environmentCam.label;
+                    } else {
+                        // 2. 否則使用第一個找到的設備
+                        targetId = devices[0].id;
+                        targetLabel = devices[0].label;
+                    }
+                    
+                    if (scannerText) scannerText.innerText = `偵測到 ${targetLabel}，嘗試啟動...`;
+
+                    // 3. 使用特定的 Device ID 啟動，這是最可靠的方式
+                    await html5QrCode.start(
+                        targetId, // 使用 deviceId string
+                        config, 
+                        onScanSuccess, 
+                        onScanError
+                    );
+
+                    if (scannerText) scannerText.innerText = "相機已啟動，請對準 QR Code";
+                    
+                } else {
+                    // 找不到任何相機
+                    if (scannerText) scannerText.innerText = "🚨 找不到任何相機設備。";
+                    setFlashMessage("🚨 找不到相機。請檢查權限。", false);
                 }
-                // 如果是 NotFoundError 或其他設備相關錯誤，則進行嘗試 2
-                console.warn("Attempt 1 (environment) failed, trying fallback:", err);
-            }
-
-            // --- 嘗試 2: 任意可用鏡頭 (fallback) ---
-            try {
-                if (scannerText) scannerText.innerText = "後置鏡頭找不到，嘗試任意鏡頭...";
-                // 使用空物件 {} 或 true，讓瀏覽器選擇任何可用的相機
-                await html5QrCode.start(
-                    {}, 
-                    config, onScanSuccess, onScanError
-                );
-                if (scannerText) scannerText.innerText = "相機已啟動 (Fallback)，請對準 QR Code";
-                return; // 成功啟動，直接返回
+                
             } catch (err) {
                 // 最終錯誤處理
                 handleFinalCameraError(err, scannerText);
