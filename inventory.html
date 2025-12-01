@@ -76,15 +76,30 @@
         #detail-modal.active .modal-content {
             transform: translateY(0);
         }
-        /* R4: 製碼區域置中 */
-        .qrcode-container { display: flex; justify-content: center; background: white; padding: 15px; border-radius: 12px; margin-top: 15px; }
+        .modal-header { background: var(--primary); color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .modal-body { padding: 15px; overflow-y: auto; flex: 1; }
+        .modal-close-btn { background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; }
+
+        .detail-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        .detail-label { font-size: 0.9rem; color: #64748b; margin-bottom: 5px; }
+        
+        /* R3 Fix: 製碼頁面美化 */
+        .create-card { padding: 30px 15px; text-align: center; }
+        .create-card h3 { font-size: 1.3rem; margin-bottom: 25px; color: var(--primary); }
+        .create-card input { font-size: 1.2rem; }
+        .qrcode-display { 
+            background: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0;
+            margin-top: 25px; box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            display: inline-block; /* 讓容器配合 QR Code 大小 */
+        }
+        .qrcode-container-wrapper { display: flex; justify-content: center; }
     </style>
 </head>
 <body>
 
 <div class="app-wrapper">
     <header>
-        <h1>📦 庫存系統 Final</h1>
+        <h1>📦 庫存系統 Production</h1>
         <div id="status-light" class="status-dot"></div>
     </header>
 
@@ -134,11 +149,15 @@
         </div>
 
         <div id="view-create" style="display:none;">
-            <div class="card" style="text-align:center;">
-                <h3>🖨️ 製作標籤</h3>
-                <input type="text" id="new-code" placeholder="輸入編號 (如: A-001)">
+            <div class="card create-card">
+                <h3>🖨️ 標籤製作與列印</h3>
+                <input type="text" id="new-code" placeholder="請輸入商品編號 (SKU)">
                 <button class="btn btn-gen" onclick="makeQR()">生成 QR Code</button>
-                <div class="qrcode-container" id="qrcode"></div>
+                <div class="qrcode-container-wrapper">
+                    <div class="qrcode-display" id="qrcode">
+                        <p style="margin:0; font-size:0.9rem; color:#ccc;">將在此處生成標籤</p>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
@@ -168,7 +187,7 @@
                 <div style="margin-bottom:15px;"><div class="detail-label">品名</div><input type="text" id="detail-name" onchange="updateDetailInfo('name')"></div>
                 
                 <h3 style="margin-top:0; border-top: 1px solid #f1f5f9; padding-top:10px;">庫存編輯</h3>
-                <div style="margin-bottom:10px;"><div class="detail-label">手動調整數量</div><input type="number" id="detail-qty-input" class="qty-input" min="0"></div>
+                <div style="margin-bottom:10px;"><div class="detail-label">手動調整至此數量</div><input type="number" id="detail-qty-input" class="qty-input" min="0"></div>
                 <button class="btn btn-in" style="width:100%;" onclick="updateDetailQty()">手動調整並儲存</button>
             </div>
 
@@ -260,11 +279,12 @@
         renderList(allData);
     });
 
+    // R2 Fix: 日期顯示修正
     function renderList(data) {
         const container = document.getElementById('list-container');
         if(data.length === 0) return container.innerHTML = "<div style='text-align:center;color:#ccc'>無資料</div>";
         container.innerHTML = data.map(item => {
-            const date = item.lastInboundDate ? item.lastInboundDate.toDate().toLocaleDateString() : '無紀錄';
+            const date = item.lastInboundDate && item.lastInboundDate.toDate ? item.lastInboundDate.toDate().toLocaleDateString() : '無紀錄';
             const qtyColor = item.qty < 5 ? 'var(--danger)' : 'var(--primary)';
             return `
                 <div class="list-item" onclick="showDetail('${item.id}')">
@@ -289,7 +309,6 @@
 
         snap.forEach(doc => {
             const d = doc.data();
-            // 由於 ServerTimestamp 可能需要時間同步，這裡使用更安全的轉換
             const time = d.timestamp?.toDate ? d.timestamp.toDate().toLocaleString() : '處理中...';
             const color = d.action.includes('入庫') ? 'var(--success)' : 'var(--danger)';
             const actionText = d.action.includes('手動') ? d.action : d.action;
@@ -317,7 +336,8 @@
         db.collection("inventory").doc(id).get().then(doc => {
             if (!doc.exists) return;
             const d = doc.data();
-            const dateStr = d.lastInboundDate ? d.lastInboundDate.toDate().toLocaleDateString() : '無紀錄';
+            // R2 Fix: 日期顯示修正
+            const dateStr = d.lastInboundDate && d.lastInboundDate.toDate ? d.lastInboundDate.toDate().toLocaleDateString() : '無紀錄';
             
             document.getElementById('modal-title').innerText = d.name || "商品詳情";
             document.getElementById('detail-id').innerText = d.id;
@@ -327,7 +347,6 @@
             document.getElementById('detail-qty-input').setAttribute('data-item-id', id);
         });
         
-        // Bug Fix 2 (R5): 歷史紀錄的錯誤處理
         db.collection("logs").where("productId", "==", id).orderBy("timestamp", "desc").limit(30).get().then(snapshot => {
             const list = document.getElementById('detail-history-list');
             list.innerHTML = "";
@@ -335,7 +354,7 @@
             
             snapshot.forEach(doc => {
                 const d = doc.data();
-                const time = d.timestamp ? d.timestamp.toDate().toLocaleString() : '---';
+                const time = d.timestamp?.toDate ? d.timestamp.toDate().toLocaleString() : '處理中...';
                 const color = d.action.includes('入庫') ? 'var(--success)' : 'var(--danger)';
                 list.innerHTML += `
                     <li class="history-item">
@@ -347,14 +366,11 @@
         }).catch(error => {
             console.error("Firestore Index Error:", error);
             const list = document.getElementById('detail-history-list');
-            list.innerHTML = `<li style="color:var(--danger); padding:20px;">
-                🚨 **載入紀錄失敗！** <br> 
-                原因：需要建立複合索引 (productId/timestamp)。
-            </li>`;
+            list.innerHTML = `<li style="color:var(--danger); padding:20px;">🚨 **載入紀錄失敗！** (請確認複合索引是否建立完成)</li>`;
         });
     }
 
-    // Bug Fix 2: 修正手動調整邏輯
+    // Bug Fix 2: 修正手動調整邏輯 (移除不必要的 return false)
     function updateDetailQty() {
         const inputEl = document.getElementById('detail-qty-input');
         const id = inputEl.getAttribute('data-item-id');
@@ -371,7 +387,7 @@
             
             if (diff === 0) {
                 alert("數量未變更");
-                return false; // 返回 false 阻止 commit
+                return null; // 返回 null 阻止後續 commit
             }
 
             const action = diff > 0 ? "手動入庫" : "手動出庫";
@@ -379,26 +395,18 @@
 
             const batch = db.batch();
             
-            // 1. 更新庫存
-            batch.update(doc.ref, { 
-                qty: newQty, 
-                updatedAt: ServerTimestamp 
-            });
+            batch.update(doc.ref, { qty: newQty, updatedAt: ServerTimestamp });
 
-            // 2. 寫入 Log
             const logRef = db.collection("logs").doc();
-            batch.set(logRef, { 
-                productId: id, productName: document.getElementById('detail-name').value, 
-                action: action, amount: amount, timestamp: ServerTimestamp 
-            });
+            batch.set(logRef, { productId: id, productName: document.getElementById('detail-name').value, action: action, amount: amount, timestamp: ServerTimestamp });
 
-            return batch.commit(); // 執行批次操作
+            return batch.commit();
         }).then((result) => {
-            // 如果 result 是 false (數量未變更), 則不執行震動和刷新
-            if (result !== false) { 
+            // 只有在 commit 成功 (result 不是 null) 時才震動和刷新
+            if (result !== null) { 
                 vibrate([50, 50, 50]);
                 alert("庫存調整成功！");
-                showDetail(id); // 刷新紀錄列表
+                showDetail(id);
             }
         }).catch(err => {
             console.error("Manual Adjust Error:", err);
@@ -417,7 +425,7 @@
     function closeDetail() {
         document.getElementById('detail-modal').classList.remove('active');
         setTimeout(() => document.getElementById('detail-modal').style.display = 'none', 300); 
-        document.body.style.overflow = 'auto'; // R1 Fix: 恢復背景捲動
+        document.body.style.overflow = 'auto';
     }
 
     // --- 輔助功能 ---
@@ -433,19 +441,18 @@
         }
     }
 
-    // R1 Fix: 修正頁面切換邏輯
+    // R1 Fix: 修正頁面切換邏輯 (控制捲動)
     function switchView(view) {
         ['scan', 'list', 'logs', 'create'].forEach(v => document.getElementById('view-'+v).style.display = (v===view)?'block':'none');
         document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
         event.currentTarget.classList.add('active');
 
-        // R1 Fix: 動態切換主內容區的捲動
         const mainContent = document.getElementById('main-content-scroll');
         if (view === 'scan') {
-            mainContent.style.overflowY = 'hidden';
+            mainContent.style.overflowY = 'hidden'; // R1 Fix: 掃描頁禁止捲動
             setTimeout(startCamera, 300);
         } else {
-            mainContent.style.overflowY = 'auto'; // 允許列表頁捲動
+            mainContent.style.overflowY = 'auto'; // 列表頁允許捲動
             stopCamera();
         }
     }
@@ -453,18 +460,14 @@
     function filterList() { /* ... (Logic remains the same) ... */ }
     function exportToExcel() { /* ... (Logic remains the same) ... */ }
 
-    // ★★★ 核心修復：確保所有資源載入後才啟動 ★★★
+    // ★★★ 核心修復：使用 DOMContentLoaded 確保所有資源載入後才啟動 ★★★
     document.addEventListener('DOMContentLoaded', () => {
-        // 初始狀態：設置初始狀態為 'scan' 頁面並啟動相機
-        document.getElementById('view-scan').style.display = 'block';
         document.querySelector('.nav-btn[onclick*="scan"]').classList.add('active');
         startCamera();
         
-        // 修復 Nav 上的 inline onclicks 在 crash 後的失效問題
         document.querySelector('nav').addEventListener('click', (e) => {
             const btn = e.target.closest('.nav-btn');
             if (btn && btn.getAttribute('onclick')) {
-                // 執行原本的 onclick 屬性內容
                 eval(btn.getAttribute('onclick'));
             }
         });
