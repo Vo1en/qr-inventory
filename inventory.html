@@ -223,9 +223,10 @@
         window.handleLogout = async function() {
             stopCamera();
             try {
-                // FIX: 登出後，onAuthStateChanged 會觸發並顯示登入畫面
+                // FIX 1: 登出後，強制刷新頁面以確保UI和狀態完全重置到未登入狀態
                 await signOut(auth);
-                setFlashMessage("已登出。");
+                setFlashMessage("已登出，正在重載頁面...", true);
+                setTimeout(() => window.location.reload(), 500); // 確保 Firebase 登出完成後再重載
             } catch (error) {
                 console.error("Logout Failed:", error);
                 setFlashMessage("登出失敗。", false);
@@ -300,7 +301,18 @@
 
             const config = { fps: 10, qrbox: qrboxFunction };
 
-            const onScanSuccess = (decodedText) => { vibrate([50]); fetchItemData(decodedText); };
+            // FIX 3.1: 掃描成功後，檢查是否為重複掃描的 ID
+            let lastScannedId = null;
+            const onScanSuccess = (decodedText) => { 
+                if (decodedText !== lastScannedId) {
+                    lastScannedId = decodedText;
+                    vibrate([50]); 
+                    fetchItemData(decodedText);
+                    
+                    // 可選: 短暫停止掃描以避免連續震動，但這會增加延遲
+                    // setTimeout(() => { lastScannedId = null; }, 1500); 
+                }
+            };
             const onScanError = (errorMessage) => { /* 忽略詳細錯誤訊息以保持控制台清潔 */ };
             
             try {
@@ -414,11 +426,8 @@
             if (!currentItem.id || !db || !userId || !isAuthReady) {
                 return setFlashMessage("請先掃描商品 ID 或完成登入。", false);
             }
-            // 權限檢查：操作員和管理員都可以執行
-            if (userRole === 'unknown') {
-                return setFlashMessage("請先完成身份驗證。", false);
-            }
-
+            // FIX 2: 移除對 userRole === 'unknown' 的檢查，因為所有登入的用戶都是 staff 或 manager
+            
             const opAmountEl = document.getElementById('op-amount');
             const amount = parseInt(opAmountEl.value);
             
@@ -703,7 +712,7 @@
 
         window.closeDetailModal = function() {
             document.getElementById('modal-content').classList.add('translate-y-full');
-            document.getElementById('detail-modal').classList.remove('opacity-100', 'pointer-events-auto');
+            document.getElementById('detail-modal').classList.remove('opacity-100', 'pointer-events-none');
         }
         
         window.updateDetailInfo = async function() {
