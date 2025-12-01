@@ -2,1190 +2,827 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>終極庫存系統 V3.1</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>終極庫存系統 V4.0 - GitHub Ready</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap">
 
-    <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+    <!-- Firebase Modular SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
+        import { getFirestore, doc, collection, onSnapshot, updateDoc, setDoc, query, orderBy, serverTimestamp, runTransaction, getDoc, where, limit, FieldValue } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-firestore.js";
+        
+        // --- 1. 全域變數與初始化 ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        // 修正錯誤：避免自我引用 'initialAuthToken'，檢查 __initial_auth_token 變數
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
 
-    <!-- QR Code 相關 -->
-    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+        let db;
+        let auth;
+        let userId = null;
+        let isAuthReady = false;
+        let html5QrCode; 
+        
+        // 應用程式狀態
+        let currentItem = { id: null, name: '', qty: 0, location: '' };
+        let allInventoryData = [];
+
+        // 輔助函式
+        const formatTimestamp = (timestamp) => {
+            if (!timestamp || !timestamp.toDate) return '載入中...';
+            return timestamp.toDate().toLocaleString('zh-TW', { hour12: false });
+        };
+        const vibrate = (pattern) => { if (navigator.vibrate) navigator.vibrate(pattern); };
+        const setFlashMessage = (message, isSuccess = false) => {
+            const banner = document.getElementById('error-banner');
+            banner.innerText = message;
+            banner.className = `fixed bottom-20 left-1/2 -translate-x-1/2 z-50 p-3 text-white rounded-lg shadow-2xl max-w-xs w-full text-sm text-center animate-pulse transition duration-300 cursor-pointer ${isSuccess ? 'bg-green-600' : 'bg-red-600'}`;
+            banner.style.display = 'block';
+            setTimeout(() => banner.style.display = 'none', 3000);
+        };
+        
+        // --- 2. Firebase & Auth 啟動 ---
+        async function initializeFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // 登入邏輯
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        document.getElementById('user-id-display').innerText = `ID: ${userId.substring(0, 8)}...`;
+                        document.getElementById('status-dot').className = 'w-3 h-3 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]';
+                        // 開始訂閱數據
+                        setupFirestoreListeners();
+                        // 首次啟動相機
+                        setTimeout(startCamera, 500);
+                    } else {
+                        try {
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        } catch (error) {
+                            console.error("Authentication Error:", error);
+                            setFlashMessage("身份驗證失敗，功能受限。");
+                            userId = 'anonymous'; 
+                            isAuthReady = true;
+                            document.getElementById('user-id-display').innerText = `ID: N/A`;
+                            document.getElementById('status-dot').className = 'w-3 h-3 rounded-full bg-red-400';
+                            setupFirestoreListeners();
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error("Firebase Init Failed:", e);
+                setFlashMessage("系統初始化失敗。");
+            }
+        }
+        
+        // --- 3. Firestore 即時監聽器 ---
+        function setupFirestoreListeners() {
+            const inventoryPath = `/artifacts/${appId}/users/${userId}/inventory_v4`;
+            const logsPath = `/artifacts/${appId}/users/${userId}/logs_v4`;
+
+            // 庫存列表訂閱
+            onSnapshot(collection(db, inventoryPath), (snapshot) => {
+                allInventoryData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+                renderList(allInventoryData);
+            }, (error) => {
+                console.error("Inventory Snapshot Error:", error);
+                setFlashMessage("無法載入庫存數據。");
+            });
+
+            // 操作紀錄訂閱 (最多 50 筆)
+            const logsQuery = query(collection(db, logsPath), orderBy("timestamp", "desc"), limit(50));
+            onSnapshot(logsQuery, (snapshot) => {
+                renderLogs(snapshot.docs.map(doc => doc.data()));
+            }, (error) => {
+                console.error("Logs Snapshot Error:", error);
+            });
+        }
+        
+        // --- 4. 掃描器控制 (修正: 使用 getCameras() 確保設備存在) ---
+        async function startCamera() {
+            if (typeof window.Html5Qrcode === 'undefined') {
+                setFlashMessage("QR 掃描庫載入中，請稍候...");
+                return;
+            }
+            if (!html5QrCode) html5QrCode = new window.Html5Qrcode("scanner-container");
+            
+            const scannerText = document.querySelector('#scanner-container p');
+            if (scannerText) scannerText.innerText = "正在偵測可用相機...";
+
+            const qrboxFunction = (viewfinderWidth, viewfinderHeight) => {
+                let minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                let size = Math.floor(minEdge * 0.7);
+                return { width: size, height: size };
+            };
+
+            const config = { fps: 10, qrbox: qrboxFunction };
+            let cameraId = null;
+            let cameraLabel = 'default';
+
+            try {
+                // 1. 取得所有可用相機
+                const devices = await window.Html5Qrcode.getCameras();
+                if (devices && devices.length) {
+                    // 2. 優先選擇後置鏡頭 (包含 'back', 'environment', 'external' 等關鍵字)
+                    const environmentCam = devices.find(d => 
+                        d.label.toLowerCase().includes('back') || 
+                        d.label.toLowerCase().includes('environment') || 
+                        d.label.toLowerCase().includes('external')
+                    );
+                    
+                    if (environmentCam) {
+                        cameraId = environmentCam.id;
+                        cameraLabel = environmentCam.label;
+                    } else {
+                        // 3. 否則使用第一個找到的設備 (通常是前置或預設)
+                        cameraId = devices[0].id;
+                        cameraLabel = devices[0].label;
+                    }
+                    
+                    if (scannerText) scannerText.innerText = `偵測到相機: ${cameraLabel}，正在啟動...`;
+
+                    // 4. 使用設備 ID 啟動掃描器
+                    await html5QrCode.start(
+                        cameraId,
+                        config, 
+                        (decodedText) => { vibrate([50]); fetchItemData(decodedText); },
+                        (errorMessage) => { /* 忽略詳細錯誤 */ }
+                    );
+                } else {
+                    // 找不到任何相機
+                    if (scannerText) scannerText.innerText = "🚨 找不到任何相機設備。";
+                    setFlashMessage("🚨 找不到相機。請檢查權限。", false);
+                }
+            } catch (err) {
+                // 啟動失敗或權限被拒
+                console.error("Camera startup error:", err);
+                if (err.name === 'NotAllowedError' || err.message.includes('permission')) {
+                     if (scannerText) scannerText.innerText = "🚨 啟動失敗：請授予相機權限。";
+                     setFlashMessage("🚨 請授予相機權限以進行掃描。", false);
+                } else if (err.name === 'NotFoundError') {
+                    if (scannerText) scannerText.innerText = "🚨 找不到指定的相機。";
+                    setFlashMessage("🚨 找不到指定的相機。請檢查設備。", false);
+                } else {
+                    if (scannerText) scannerText.innerText = "🚨 相機啟動發生未知錯誤。";
+                    setFlashMessage("🚨 相機啟動失敗。", false);
+                }
+            }
+        }
+
+        function stopCamera() {
+            if (html5QrCode && html5QrCode.isScanning) {
+                // 重設掃描容器的提示文本
+                const scannerText = document.querySelector('#scanner-container p');
+                if (scannerText) scannerText.innerText = "正在啟動相機...";
+                html5QrCode.stop().catch(err => console.error("Camera stop failed:", err));
+            }
+        }
+
+        // --- 5. 掃描結果處理 ---
+        async function fetchItemData(id) {
+            const docRef = doc(db, `/artifacts/${appId}/users/${userId}/inventory_v4`, id);
+            
+            try {
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    currentItem = { id: docSnap.id, ...docSnap.data() };
+                } else {
+                    currentItem = { id: id, name: '', qty: 0, location: '' };
+                }
+                updateScanViewUI();
+            } catch (e) {
+                console.error("Fetch Item Error:", e);
+                setFlashMessage("讀取商品資訊失敗。");
+            }
+        }
+
+        function updateScanViewUI() {
+            document.getElementById('res-id').innerText = currentItem.id || "---";
+            document.getElementById('res-name').value = currentItem.name || "";
+            document.getElementById('res-name').placeholder = currentItem.id ? "輸入商品名稱 (失焦後儲存)" : "新商品 - 請命名";
+            document.getElementById('res-qty').innerText = currentItem.qty;
+            document.getElementById('op-amount').value = 1; // 重設操作數量
+        }
+
+        function handleNameUpdate() {
+            if (!currentItem.id || !db) return;
+            const newName = document.getElementById('res-name').value;
+            if (newName === currentItem.name) return;
+            currentItem.name = newName;
+            setDoc(doc(db, `/artifacts/${appId}/users/${userId}/inventory_v4`, currentItem.id), { name: newName, updatedAt: serverTimestamp() }, { merge: true });
+        }
+
+        // --- 6. 庫存操作 (入庫/出庫) ---
+        async function handleStock(direction) {
+            if (!currentItem.id || !db || !userId) return;
+            const opAmountEl = document.getElementById('op-amount');
+            const amount = parseInt(opAmountEl.value);
+            
+            if (isNaN(amount) || amount <= 0) return setFlashMessage("數量必須大於 0");
+
+            const inventoryPath = `/artifacts/${appId}/users/${userId}/inventory_v4`;
+            const logsPath = `/artifacts/${appId}/users/${userId}/logs_v4`;
+            const itemRef = doc(db, inventoryPath, currentItem.id);
+            const change = amount * direction;
+
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const itemDoc = await transaction.get(itemRef);
+                    const currentQty = itemDoc.exists() ? itemDoc.data().qty : 0;
+                    const newQty = currentQty + change;
+
+                    if (newQty < 0) throw new Error("庫存不足，無法出庫！");
+
+                    const name = document.getElementById('res-name').value || '未命名';
+                    const updateFields = {
+                        name: name,
+                        qty: newQty,
+                        updatedAt: serverTimestamp(),
+                        id: currentItem.id,
+                    };
+
+                    if (direction > 0) updateFields.lastInboundDate = serverTimestamp();
+
+                    transaction.set(itemRef, updateFields, { merge: true });
+
+                    // 寫入紀錄
+                    const logRef = doc(collection(db, logsPath));
+                    transaction.set(logRef, {
+                        productId: currentItem.id,
+                        productName: name,
+                        action: direction > 0 ? "入庫" : "出庫",
+                        amount: amount,
+                        timestamp: serverTimestamp(),
+                    });
+                });
+
+                vibrate([50, 50]);
+                setFlashMessage("操作成功！庫存已更新。", true);
+                opAmountEl.value = 1;
+            } catch (e) {
+                setFlashMessage(e.message);
+                vibrate([100, 100, 100]);
+                console.error("Transaction failed:", e);
+            }
+        }
+        
+        // --- 7. 列表和紀錄渲染 ---
+        function renderList(data) {
+            const container = document.getElementById('list-container');
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            
+            const filteredData = data
+                .filter(item =>
+                    item.id.toLowerCase().includes(searchTerm) ||
+                    (item.name || '').toLowerCase().includes(searchTerm)
+                )
+                .sort((a, b) => b.qty - a.qty);
+
+            if(filteredData.length === 0) {
+                return container.innerHTML = `<p class="text-center text-gray-500 py-10">${searchTerm ? "無符合條件的商品" : "庫存列表為空..."}</p>`;
+            }
+
+            container.innerHTML = filteredData.map(item => {
+                const isLowStock = item.qty < 5;
+                const dateStr = item.lastInboundDate ? formatTimestamp(item.lastInboundDate).split(' ')[0] : '無紀錄';
+                const colorClass = isLowStock ? 'text-red-500' : 'text-green-600';
+                const borderClass = isLowStock ? 'border-red-500' : 'border-green-500';
+
+                return `
+                    <div onclick="window.showDetailModal('${item.id}')"
+                        class="flex justify-between items-center p-4 bg-white rounded-xl shadow-md cursor-pointer hover:shadow-lg transition border-l-4 ${borderClass}">
+                        <div class="flex flex-col flex-1 truncate">
+                            <span class="font-semibold text-gray-800 truncate">${item.name || "未命名"}</span>
+                            <span class="text-xs text-gray-500 font-mono">ID: ${item.id}</span>
+                            <span class="text-xs text-gray-500 mt-1">最後入庫: ${dateStr}</span>
+                        </div>
+                        <div class="text-3xl font-extrabold ${colorClass}">
+                            ${item.qty}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderLogs(logsData) {
+            const container = document.getElementById('logs-container');
+            if (logsData.length === 0) {
+                return container.innerHTML = `<p class="text-center text-gray-500 py-10">無歷史紀錄</p>`;
+            }
+
+            container.innerHTML = logsData.map(log => {
+                const isOutbound = log.action.includes('出庫');
+                const color = isOutbound ? 'text-red-600' : 'text-green-600';
+                const sign = isOutbound ? '-' : '+';
+                const time = formatTimestamp(log.timestamp);
+
+                return `
+                    <div class="flex justify-between items-center p-3 bg-white rounded-lg shadow-sm">
+                        <div class="flex flex-col flex-1 truncate">
+                            <span class="font-medium text-gray-800 truncate">${log.productName}</span>
+                            <span class="text-xs text-gray-500">${time}</span>
+                        </div>
+                        <div class="text-right flex-shrink-0 ml-4">
+                            <span class="font-extrabold text-lg ${color}">${sign}${log.amount}</span>
+                            <span class="block text-xs text-gray-600">${log.action}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // --- 8. 商品詳情模態框邏輯 ---
+        window.showDetailModal = async function(id) {
+            const modal = document.getElementById('detail-modal');
+            modal.classList.add('opacity-100', 'pointer-events-auto');
+            document.getElementById('modal-content').classList.remove('translate-y-full');
+            
+            // 載入商品基本數據
+            const docRef = doc(db, `/artifacts/${appId}/users/${userId}/inventory_v4`, id);
+            const docSnap = await getDoc(docRef);
+            if (!docSnap.exists()) return setFlashMessage("商品不存在。");
+            
+            const d = docSnap.data();
+            const dateStr = d.lastInboundDate ? formatTimestamp(d.lastInboundDate).split(' ')[0] : '無紀錄';
+
+            document.getElementById('modal-title').innerText = d.name || "商品詳情";
+            document.getElementById('detail-id').innerText = d.id;
+            document.getElementById('detail-inbound-date').innerText = dateStr;
+            document.getElementById('detail-name').value = d.name || "";
+            document.getElementById('detail-location').value = d.location || "";
+            document.getElementById('detail-qty-input').value = d.qty;
+            document.getElementById('detail-qty-input').setAttribute('data-item-id', id);
+
+            // 載入歷史紀錄
+            const logsPath = `/artifacts/${appId}/users/${userId}/logs_v4`;
+            const detailLogsQuery = query(collection(db, logsPath), where("productId", "==", id), orderBy("timestamp", "desc"), limit(20));
+            const historyList = document.getElementById('detail-history-list');
+            historyList.innerHTML = `<li class="text-center text-gray-500 py-4">載入中...</li>`;
+            
+            const snapshot = await getDocs(detailLogsQuery); // 這裡使用 getDocs 替代 onSnapshot
+            
+            if (snapshot.empty) {
+                historyList.innerHTML = `<li class="text-center text-gray-500 py-4">無歷史紀錄</li>`;
+            } else {
+                historyList.innerHTML = snapshot.docs.map(logDoc => {
+                    const log = logDoc.data();
+                    const time = formatTimestamp(log.timestamp);
+                    const isOutbound = log.action.includes('出庫');
+                    const color = isOutbound ? 'text-red-500' : 'text-green-500';
+                    const sign = isOutbound ? '-' : '+';
+                    
+                    return `
+                        <li class="flex justify-between items-center text-sm border-b last:border-b-0 py-2">
+                            <span class="text-gray-600 font-medium">${log.action}</span>
+                            <div class="text-right">
+                                <span class="font-bold ${color}">${sign}${log.amount}</span>
+                                <span class="block text-xs text-gray-400">${time}</span>
+                            </div>
+                        </li>
+                    `;
+                }).join('');
+            }
+        }
+
+        window.closeDetailModal = function() {
+            document.getElementById('modal-content').classList.add('translate-y-full');
+            document.getElementById('detail-modal').classList.remove('opacity-100', 'pointer-events-auto');
+        }
+        
+        window.updateDetailInfo = async function() {
+            const id = document.getElementById('detail-qty-input').getAttribute('data-item-id');
+            const name = document.getElementById('detail-name').value;
+            const location = document.getElementById('detail-location').value;
+            
+            if (!id || !db) return;
+            
+            try {
+                await updateDoc(doc(db, `/artifacts/${appId}/users/${userId}/inventory_v4`, id), { 
+                    name: name, 
+                    location: location, 
+                    updatedAt: serverTimestamp() 
+                });
+                setFlashMessage("基本資訊更新成功！", true);
+            } catch (e) {
+                console.error("Update Detail Error:", e);
+                setFlashMessage("更新失敗。");
+            }
+        }
+
+        window.handleManualUpdate = async function() {
+            const inputEl = document.getElementById('detail-qty-input');
+            const id = inputEl.getAttribute('data-item-id');
+            const newQty = parseInt(inputEl.value);
+            
+            if (!id || isNaN(newQty) || newQty < 0) return setFlashMessage("數量無效或 ID 缺失。");
+
+            const inventoryPath = `/artifacts/${appId}/users/${userId}/inventory_v4`;
+            const logsPath = `/artifacts/${appId}/users/${userId}/logs_v4`;
+            const itemRef = doc(db, inventoryPath, id);
+            
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const itemDoc = await transaction.get(itemRef);
+                    const oldQty = itemDoc.exists() ? itemDoc.data().qty : 0;
+                    const diff = newQty - oldQty;
+
+                    if (diff === 0) throw new Error("數量未變更");
+
+                    const action = diff > 0 ? "手動入庫" : "手動出庫";
+                    const amount = Math.abs(diff);
+
+                    // 更新商品基本資訊和庫存
+                    transaction.update(itemRef, { 
+                        qty: newQty, 
+                        updatedAt: serverTimestamp() 
+                    });
+
+                    // 寫入紀錄
+                    const logRef = doc(collection(db, logsPath));
+                    transaction.set(logRef, {
+                        productId: id,
+                        productName: document.getElementById('detail-name').value,
+                        action: action,
+                        amount: amount,
+                        timestamp: serverTimestamp(),
+                    });
+                });
+
+                vibrate([50, 50, 50]);
+                setFlashMessage("庫存調整成功！", true);
+                window.showDetailModal(id); // 重新載入詳情
+            } catch (e) {
+                setFlashMessage(e.message);
+                console.error("Manual Adjust Error:", e);
+            }
+        }
+        
+        // --- 9. 輔助功能 ---
+        window.switchView = function(view) {
+            const views = { 'scan': 'view-scan', 'list': 'view-list', 'logs': 'view-logs', 'create': 'view-create' };
+            // mainContent 已經被設定為 overflow-y-auto
+
+            Object.keys(views).forEach(v => {
+                document.getElementById(views[v]).classList.add('hidden');
+            });
+            document.getElementById(views[view]).classList.remove('hidden');
+
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('text-indigo-600'));
+            document.querySelector(`.nav-btn[data-view="${view}"]`).classList.add('text-indigo-600');
+
+            if (view === 'scan') {
+                setTimeout(startCamera, 300);
+            } else {
+                stopCamera();
+                if (view === 'list') renderList(allInventoryData);
+            }
+        }
+        
+        window.filterList = function() {
+            renderList(allInventoryData);
+        }
+
+        window.fillMaxStock = function() {
+            const currentQty = parseInt(document.getElementById('res-qty').innerText) || 0;
+            document.getElementById('op-amount').value = currentQty;
+            vibrate([50]);
+        }
+        
+        window.makeQR = function() {
+            vibrate([50]);
+            const text = document.getElementById('new-code').value;
+            if(!text) return;
+            
+            const qrcodeContainer = document.getElementById('qrcode-display-canvas');
+            if (typeof window.QRCode !== 'undefined') {
+                qrcodeContainer.innerHTML = '';
+                new window.QRCode(qrcodeContainer, {
+                    text: text,
+                    width: 150,
+                    height: 150,
+                    colorDark : "#0f172a",
+                    colorLight : "#ffffff",
+                    correctLevel : window.QRCode.CorrectLevel.H
+                });
+            } else {
+                setFlashMessage("QRCode 元件載入失敗，請檢查網路。");
+            }
+        }
+
+        window.exportToExcel = function() {
+            vibrate([50]);
+            if (allInventoryData.length === 0) return setFlashMessage("沒有庫存數據可匯出。");
+
+            const header = ["商品編號 (ID)", "品名", "庫存數量", "存放位置", "最後入庫日", "更新時間"].join(',');
+            const csvRows = allInventoryData.map(item => {
+                const lastInbound = item.lastInboundDate ? formatTimestamp(item.lastInboundDate) : '';
+                const updatedAt = item.updatedAt ? formatTimestamp(item.updatedAt) : '';
+                return [
+                    `"${item.id}"`,
+                    `"${item.name || '未命名'}"`,
+                    item.qty,
+                    `"${item.location || ''}"`,
+                    `"${updatedAt}"`
+                ].join(',');
+            });
+
+            const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + header + "\n" + csvRows.join('\n');
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `inventory_export_${new Date().toISOString().slice(0, 10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // --- 10. 應用程式啟動 ---
+        document.addEventListener('DOMContentLoaded', initializeFirebase);
+
+    </script>
+    
+    <!-- QR Code Core Libraries (Global) -->
+    <script src="https://unpkg.com/html5-qrcode" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
 
     <style>
-        :root {
-            --primary: #2563eb;
-            --success: #10b981;
-            --danger: #ef4444;
-            --bg: #f1f5f9;
-            --card: #ffffff;
-            --nav-height: 68px;
-            --header-height: 60px;
-        }
-
-        * {
-            box-sizing: border-box;
-            -webkit-tap-highlight-color: transparent;
-            outline: none;
-        }
-
+        /* 基礎樣式和 Tailwind 覆蓋 */
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #cbd5e1;
-            margin: 0;
-            padding: 0;
+            font-family: 'Inter', sans-serif;
+            background-color: #e5e7eb; /* 灰色背景 */
             height: 100vh;
             height: 100dvh;
-            overflow: hidden;
-            display: flex;
-            justify-content: center;
         }
-
         .app-wrapper {
             width: 100%;
             max-width: 480px;
-            background-color: #f8fafc;
+            background-color: #f9fafb; /* 淺灰 App 背景 */
             height: 100%;
             display: flex;
             flex-direction: column;
-            position: relative;
-            box-shadow: 0 0 25px rgba(0, 0, 0, 0.15);
+            box-shadow: 0 0 25px rgba(0,0,0,0.15);
         }
+        /* Fix for Safari bottom padding */
+        nav { padding-bottom: env(safe-area-inset-bottom); }
 
-        /* Header */
-        header {
-            flex: 0 0 var(--header-height);
-            background: var(--primary);
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 16px;
-            z-index: 20;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        }
-
-        header h1 {
-            margin: 0;
-            font-size: 1.05rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        header h1 span.logo {
-            font-size: 1.1rem;
-        }
-
-        .status-dot {
-            width: 9px;
-            height: 9px;
-            border-radius: 999px;
-            background: #9ca3af;
-            box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
-            transition: background 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        .status-dot.online {
-            background: #4ade80;
-            box-shadow: 0 0 10px rgba(74, 222, 128, 0.9);
-        }
-
-        /* Main 內容區 */
-        main {
-            flex: 1;
-            overflow-y: auto;
-            overflow-x: hidden;
-            padding: 12px;
-            padding-bottom: 16px;
-            position: relative;
-        }
-
-        .card {
-            background: var(--card);
-            border-radius: 16px;
-            padding: 16px;
-            margin-bottom: 14px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-        }
-
-        /* 底部導覽列 */
-        nav {
-            flex: 0 0 var(--nav-height);
-            background: #ffffff;
-            border-top: 1px solid #e5e7eb;
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-            padding-bottom: env(safe-area-inset-bottom);
-            z-index: 20;
-        }
-
-        .nav-btn {
-            background: none;
-            border: none;
-            color: #94a3b8;
-            font-size: 0.78rem;
-            font-weight: 600;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 4px 2px;
-            width: 100%;
-            height: 100%;
-            cursor: pointer;
-        }
-
-        .nav-btn .nav-icon {
-            font-size: 1.35rem;
-            margin-bottom: 3px;
-        }
-
-        .nav-btn.active {
-            color: var(--primary);
-        }
-
-        .nav-btn.active .nav-icon {
-            transform: translateY(-1px);
-        }
-
-        /* 相機區塊 */
-        #camera-wrapper {
-            position: relative;
-            border-radius: 14px;
-            overflow: hidden;
-            background: #000;
-            height: 260px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        #reader {
-            width: 100%;
-            height: 100%;
-        }
-
-        #reader video {
-            object-fit: cover;
+        /* 相機容器 */
+        #scanner-container video {
+            object-fit: cover !important;
             width: 100% !important;
             height: 100% !important;
-            border-radius: 14px;
         }
-
-        /* 輸入 / 數量區塊 */
-        input[type="text"],
-        input[type="number"] {
-            width: 100%;
-            padding: 11px 10px;
-            text-align: center;
-            border: 2px solid #e2e8f0;
-            border-radius: 10px;
-            font-size: 1rem;
-            margin: 6px 0;
-            background: #f8fafc;
-        }
-
-        input[readonly] {
-            background: #e5e7eb;
-        }
-
-        .current-stock {
-            font-size: 1.5rem;
-            font-weight: 800;
-            color: var(--primary);
-        }
-
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-top: 6px;
-        }
-
-        .info-row-label {
-            font-size: 0.88rem;
-            color: #64748b;
-        }
-
-        .action-area {
-            background: #f1f5f9;
-            padding: 13px;
-            border-radius: 12px;
-            margin-top: 10px;
-        }
-
-        .btn-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-
-        .btn {
-            padding: 13px;
-            border: none;
-            border-radius: 10px;
-            font-size: 0.95rem;
-            font-weight: bold;
-            color: white;
-            cursor: pointer;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.15);
-        }
-
-        .btn span.sub {
-            font-size: 0.75rem;
-            font-weight: 500;
-            opacity: 0.9;
-        }
-
-        .btn-in {
-            background: linear-gradient(135deg, #10b981, #059669);
-        }
-
-        .btn-out {
-            background: linear-gradient(135deg, #ef4444, #dc2626);
-        }
-
-        .btn-fill {
-            background: #60a5fa;
-            color: white;
-            padding: 8px 10px;
-            font-size: 0.8rem;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-            white-space: nowrap;
-        }
-
-        .qty-input-row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            margin-top: 4px;
-        }
-
-        .qty-input-row input {
-            flex: 1;
-            margin: 0;
-        }
-
-        /* 列表樣式 */
-        .list-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 11px 4px;
-            border-bottom: 1px solid #f1f5f9;
-            cursor: pointer;
-        }
-
-        .list-item:last-child {
-            border-bottom: none;
-        }
-
-        .list-main {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .list-title {
-            font-weight: 600;
-            font-size: 0.92rem;
-            color: #0f172a;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .list-sub {
-            font-size: 0.75rem;
-            color: #64748b;
-            margin-top: 2px;
-        }
-
-        .list-qty {
-            font-size: 1.1rem;
-            font-weight: 700;
-            min-width: 42px;
-            text-align: right;
-        }
-
-        /* 搜尋 + 匯出 */
-        .sticky-search {
-            position: sticky;
-            top: 0;
-            z-index: 5;
-            background: #f8fafc;
-            padding-bottom: 6px;
-            margin-bottom: 6px;
-        }
-
-        .search-row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
-
-        #search-input {
-            flex: 1;
-            margin: 0;
-            text-align: left;
-            font-size: 0.9rem;
-            padding-left: 12px;
-        }
-
-        .btn-export {
-            border-radius: 10px;
-            border: none;
-            padding: 9px 10px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            background: #0f172a;
-            color: #e5e7eb;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            cursor: pointer;
-            white-space: nowrap;
-        }
-
-        .btn-export span.icon {
-            font-size: 1rem;
-        }
-
-        /* 製碼頁面 */
-        .create-card {
-            padding: 22px 14px 26px;
-            text-align: center;
-        }
-
-        .create-card h3 {
-            font-size: 1.1rem;
-            margin-top: 0;
-            margin-bottom: 18px;
-            color: var(--primary);
-        }
-
-        .create-card input {
-            margin-bottom: 10px;
-        }
-
-        .btn-gen {
-            width: 100%;
-            margin-top: 4px;
-            background: linear-gradient(135deg, #6366f1, #2563eb);
-        }
-
-        .qrcode-container-wrapper {
-            display: flex;
-            justify-content: center;
-            margin-top: 18px;
-        }
-
-        .qrcode-display {
-            background: #ffffff;
-            padding: 14px;
-            border-radius: 12px;
-            border: 2px dashed #e2e8f0;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
-            display: inline-block;
-            min-width: 150px;
-            min-height: 150px;
-        }
-
-        .qrcode-display p {
-            margin: 0;
-            font-size: 0.86rem;
-            color: #94a3b8;
-            text-align: center;
-        }
-
-        /* 詳細視窗 (底部滑出) */
-        #detail-modal {
-            position: fixed;
-            inset: 0;
-            background: rgba(15, 23, 42, 0.55);
-            z-index: 100;
-            display: none;
-            justify-content: center;
-            align-items: flex-end;
-        }
-
-        #detail-modal.active {
-            display: flex;
-        }
-
-        .modal-content {
-            background: var(--bg);
-            width: 100%;
-            max-width: 480px;
-            height: 90%;
-            border-radius: 20px 20px 0 0;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            transform: translateY(100%);
-            transition: transform 0.25s ease-out;
-        }
-
-        #detail-modal.active .modal-content {
-            transform: translateY(0);
-        }
-
-        .modal-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 16px;
-            background: #ffffff;
-            border-bottom: 1px solid #e5e7eb;
-        }
-
-        .modal-header h2 {
-            margin: 0;
-            font-size: 1.02rem;
-        }
-
-        .modal-close-btn {
-            background: none;
-            border: none;
-            font-size: 1.6rem;
-            line-height: 1;
-            cursor: pointer;
-            color: #64748b;
-        }
-
-        .modal-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 10px 10px 16px;
-        }
-
-        .detail-info-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin-bottom: 10px;
-        }
-
-        .detail-label {
-            font-size: 0.78rem;
-            color: #94a3b8;
-            margin-bottom: 2px;
-        }
-
-        .detail-value {
-            font-size: 0.9rem;
-            font-weight: 500;
-            color: #1f2933;
-            word-break: break-all;
-        }
-
-        .history-list {
-            list-style: none;
-            margin: 0;
-            padding: 0;
-            max-height: 260px;
-            overflow-y: auto;
-        }
-
-        .history-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
-            border-bottom: 1px solid #e5e7eb;
-            font-size: 0.8rem;
-        }
-
-        .history-item:last-child {
-            border-bottom: none;
-        }
-
-        .history-time {
-            color: #64748b;
-            margin-right: 8px;
-        }
-
-        /* 小提醒文字 */
-        .helper-text {
-            font-size: 0.75rem;
-            color: #9ca3af;
-            margin-top: 2px;
-        }
-
-        @media (max-height: 650px) {
-            #camera-wrapper {
-                height: 220px;
-            }
+        /* 隱藏列印按鈕 */
+        @media print {
+            .print\\:hidden { display: none !important; }
+            .print\\:block { display: block !important; }
+            .print-area { margin: 0; box-shadow: none; border: none; }
         }
     </style>
 </head>
-<body>
-<div class="app-wrapper">
 
+<body class="flex justify-center overflow-hidden">
+
+<div class="app-wrapper">
     <!-- Header -->
-    <header>
-        <h1>
-            <span class="logo">📦</span>
-            終極庫存系統
-        </h1>
-        <div id="status-light" class="status-dot" title="連線狀態"></div>
+    <header class="flex-shrink-0 bg-indigo-700 text-white p-4 flex justify-between items-center shadow-lg">
+        <h1 class="text-xl font-bold tracking-wider">📦 終極庫存系統 V4.0</h1>
+        <div class="flex items-center space-x-2">
+            <span id="user-id-display" class="text-xs font-mono opacity-70">ID: 載入中...</span>
+            <div id="status-dot" class="w-3 h-3 rounded-full bg-red-400" title="連線狀態"></div>
+        </div>
     </header>
 
-    <!-- Main Content -->
-    <main id="main-content-scroll">
-
-        <!-- 1. 掃描頁面 -->
-        <section id="view-scan">
-            <div class="card" style="padding:0; margin-bottom: 10px;">
-                <div id="camera-wrapper">
-                    <div id="reader"></div>
+    <!-- Content Area (Scrollable) -->
+    <main id="main-content-scroll" class="flex-grow overflow-y-auto">
+        
+        <!-- 1. 掃描頁面 (預設顯示) -->
+        <div id="view-scan" class="p-4 space-y-4">
+            <div class="bg-white rounded-xl shadow-lg overflow-hidden border-4 border-indigo-500/50">
+                <div id="scanner-container" class="w-full h-64 bg-gray-900 flex items-center justify-center text-white text-lg">
+                    <p>正在啟動相機...</p>
                 </div>
             </div>
 
-            <div id="scan-result" class="card">
-                <div id="res-id"
-                     style="text-align:center; color:#94a3b8; font-family:monospace; margin-bottom:6px;">請先掃描 QR
+            <div class="bg-white p-5 rounded-xl shadow-xl space-y-4">
+                <p class="text-center font-mono text-xs text-gray-500 truncate"><span class='font-bold text-gray-700'>ID:</span> <span id="res-id">---</span></p>
+                
+                <input 
+                    type="text" 
+                    id="res-name" 
+                    onchange="handleNameUpdate()"
+                    placeholder="請先掃描商品"
+                    class="w-full p-3 border-2 border-gray-300 rounded-lg text-center font-bold text-lg focus:border-indigo-500 transition"
+                />
+
+                <div class="flex justify-between items-center bg-indigo-50 p-4 rounded-xl">
+                    <span class="text-lg text-indigo-700 font-semibold">目前庫存:</span>
+                    <span id="res-qty" class="text-4xl font-extrabold text-indigo-600 transition-transform duration-300">0</span>
                 </div>
 
-                <input type="text" id="res-name" placeholder="輸入或修改商品名稱" onchange="updateInfo()">
-
-                <div class="info-row">
-                    <div class="info-row-label">目前庫存</div>
-                    <div class="current-stock" id="res-qty">0</div>
-                </div>
-
-                <div class="action-area">
-                    <div style="font-size:0.82rem; color:#64748b; margin-bottom:3px;">異動數量：</div>
-                    <div class="qty-input-row">
-                        <input type="number" id="op-amount" class="qty-input" value="1" min="1" inputmode="numeric">
-                        <button type="button" class="btn-fill" onclick="fillMaxStock()">填入庫存</button>
-                    </div>
-                    <p class="helper-text">提示：出庫時可先按「填入庫存」，等於一次全數出貨。</p>
-
-                    <div class="btn-row" style="margin-top:12px;">
-                        <button class="btn btn-in" type="button" onclick="handleStock(1)">
-                            入庫
-                            <span class="sub">＋ 庫存增加</span>
+                <div class="bg-gray-100 p-4 rounded-xl space-y-3">
+                    <label class="text-sm font-semibold text-gray-700 block">異動數量:</label>
+                    
+                    <div class="flex gap-2">
+                        <input 
+                            type="number" 
+                            id="op-amount" 
+                            value="1" 
+                            min="1" 
+                            inputmode="numeric"
+                            class="flex-grow p-3 border-2 border-gray-300 rounded-lg text-center font-semibold text-xl"
+                        />
+                        <button 
+                            onclick="fillMaxStock()"
+                            class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 text-sm flex-shrink-0"
+                        >
+                            填入庫存
                         </button>
-                        <button class="btn btn-out" type="button" onclick="handleStock(-1)">
-                            出庫
-                            <span class="sub">－ 庫存減少</span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 pt-2">
+                        <button 
+                            onclick="handleStock(1)"
+                            class="bg-green-500 hover:bg-green-600 text-white font-extrabold py-4 rounded-xl shadow-md transition transform hover:scale-[1.02]"
+                        >
+                            <span class="text-2xl">+</span> 入庫
+                        </button>
+                        <button 
+                            onclick="handleStock(-1)"
+                            class="bg-red-500 hover:bg-red-600 text-white font-extrabold py-4 rounded-xl shadow-md transition transform hover:scale-[1.02]"
+                        >
+                            <span class="text-2xl">-</span> 出庫
                         </button>
                     </div>
                 </div>
             </div>
-        </section>
+        </div>
 
         <!-- 2. 庫存列表頁面 -->
-        <section id="view-list" style="display:none;">
-            <div class="sticky-search">
-                <div class="search-row">
-                    <input type="text" id="search-input" placeholder="🔍 依名稱或料號搜尋..."
-                           onkeyup="filterList()">
-                    <button class="btn-export" type="button" onclick="exportToExcel()">
-                        <span class="icon">📥</span> 匯出
-                    </button>
-                </div>
+        <div id="view-list" class="hidden h-full flex flex-col">
+            <div class="sticky top-0 z-10 bg-gray-50 p-4 pb-2 shadow-inner border-b">
+                <input
+                    type="text"
+                    id="search-input"
+                    placeholder="🔍 搜尋商品編號或名稱..."
+                    onkeyup="filterList()"
+                    class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 transition mb-3"
+                />
+                <button 
+                    onclick="exportToExcel()"
+                    class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 rounded-lg shadow transition"
+                >
+                    📥 匯出 Excel (CSV)
+                </button>
             </div>
-
-            <div class="card" id="list-container">
-                <div style="text-align:center; padding:20px; color:#94a3b8;">載入中...</div>
+            
+            <div id="list-container" class="flex-grow p-4 space-y-2">
+                <p class="text-center text-gray-500 py-10">載入中...</p>
             </div>
-        </section>
+        </div>
 
         <!-- 3. 紀錄頁面 -->
-        <section id="view-logs" style="display:none;">
-            <div class="card">
-                <h3 style="margin-top:0; font-size:1.02rem;">📝 近期異動紀錄</h3>
-                <div id="logs-container">
-                    <div style="text-align:center; padding:20px; color:#94a3b8;">載入中...</div>
-                </div>
+        <div id="view-logs" class="hidden p-4 overflow-y-auto">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 border-b pb-2">📝 近期異動 (最多 50 筆)</h3>
+            <div id="logs-container" class="space-y-3">
+                <p class="text-center text-gray-500 py-10">載入中...</p>
             </div>
-        </section>
+        </div>
 
         <!-- 4. 製碼頁面 -->
-        <section id="view-create" style="display:none;">
-            <div class="card create-card">
-                <h3>🏷️ 標籤製作與列印</h3>
-                <input type="text" id="new-code" placeholder="請輸入商品編號 (SKU)">
-                <button class="btn btn-gen" type="button" onclick="makeQR()">生成 QR Code</button>
-                <div class="qrcode-container-wrapper">
-                    <div class="qrcode-display" id="qrcode">
-                        <p>輸入編號並按下「生成」，即可在此列印標籤</p>
+        <div id="view-create" class="hidden p-4">
+            <div class="bg-white p-6 rounded-xl shadow-xl text-center space-y-6">
+                <h3 class="text-2xl font-bold text-indigo-600">🖨️ 標籤製作與列印</h3>
+                
+                <input
+                    type="text"
+                    id="new-code"
+                    placeholder="請輸入商品編號 (SKU)"
+                    class="w-full p-3 border-2 border-gray-300 rounded-lg text-center font-mono text-lg focus:border-indigo-500 transition"
+                />
+
+                <button 
+                    onclick="makeQR()"
+                    class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 rounded-xl shadow-md transition"
+                >
+                    生成 QR Code
+                </button>
+
+                <div class="flex justify-center mt-6 print-area">
+                    <div class="p-4 bg-white border-2 border-dashed border-gray-300 rounded-xl shadow-inner">
+                        <div id="qrcode-display-canvas" class="flex items-center justify-center w-[150px] h-[150px]">
+                            <p class="text-sm text-gray-400">點擊生成，即可在此處顯示</p>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </section>
 
+                <button 
+                    onclick="window.print()"
+                    class="w-full bg-gray-700 hover:bg-gray-800 text-white font-bold py-3 rounded-xl shadow-md transition mt-4 print:hidden"
+                >
+                    列印此標籤
+                </button>
+            </div>
+        </div>
     </main>
 
-    <!-- Nav -->
-    <nav>
-        <button class="nav-btn active" type="button" data-view="scan">
-            <span class="nav-icon">📷</span>
-            掃描
+    <!-- Footer Navigation -->
+    <nav class="flex-shrink-0 flex justify-around items-center bg-white border-t border-gray-200 shadow-xl p-2">
+        <button class="nav-btn flex flex-col items-center justify-center p-2 transition duration-200 text-indigo-600" onclick="switchView('scan')" data-view="scan">
+            <span class="text-2xl">📷</span>
+            <span class="text-xs font-medium mt-1">掃描入庫</span>
         </button>
-        <button class="nav-btn" type="button" data-view="list">
-            <span class="nav-icon">📦</span>
-            庫存
+        <button class="nav-btn flex flex-col items-center justify-center p-2 transition duration-200 text-gray-500 hover:text-indigo-400" onclick="switchView('list')" data-view="list">
+            <span class="text-2xl">📦</span>
+            <span class="text-xs font-medium mt-1">庫存列表</span>
         </button>
-        <button class="nav-btn" type="button" data-view="logs">
-            <span class="nav-icon">📝</span>
-            紀錄
+        <button class="nav-btn flex flex-col items-center justify-center p-2 transition duration-200 text-gray-500 hover:text-indigo-400" onclick="switchView('logs')" data-view="logs">
+            <span class="text-2xl">📝</span>
+            <span class="text-xs font-medium mt-1">歷史紀錄</span>
         </button>
-        <button class="nav-btn" type="button" data-view="create">
-            <span class="nav-icon">🏷️</span>
-            製碼
+        <button class="nav-btn flex flex-col items-center justify-center p-2 transition duration-200 text-gray-500 hover:text-indigo-400" onclick="switchView('create')" data-view="create">
+            <span class="text-2xl">🏷️</span>
+            <span class="text-xs font-medium mt-1">標籤製碼</span>
         </button>
     </nav>
 </div>
 
-<!-- 詳細彈窗 -->
-<div id="detail-modal" onclick="if (event.target.id === 'detail-modal') closeDetail()">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2 id="modal-title">商品詳情</h2>
-            <button class="modal-close-btn" type="button" onclick="closeDetail()">&times;</button>
+<!-- 模態框 (商品詳情與編輯) -->
+<div id="detail-modal" class="fixed inset-0 z-50 bg-black bg-opacity-70 transition-opacity duration-300 opacity-0 pointer-events-none flex justify-center items-end" onclick="if(event.target.id === 'detail-modal') closeDetailModal()">
+    <div id="modal-content" class="bg-gray-100 w-full max-w-md h-[90vh] rounded-t-2xl shadow-2xl flex flex-col transition-transform duration-300 translate-y-full">
+        <div class="flex-shrink-0 p-4 bg-white rounded-t-2xl shadow-lg flex justify-between items-center border-b">
+            <h2 id="modal-title" class="text-xl font-bold text-gray-800 truncate">商品詳情</h2>
+            <button onclick="closeDetailModal()" class="text-3xl font-light text-gray-400 hover:text-gray-600">&times;</button>
         </div>
-        <div class="modal-body">
-            <div class="card" style="margin-bottom:10px;">
-                <h3 style="margin-top:0; font-size:0.98rem;">基本資訊</h3>
-                <div class="detail-info-grid">
-                    <div>
-                        <div class="detail-label">料號 (ID)</div>
-                        <div class="detail-value" id="detail-id">---</div>
-                    </div>
-                    <div>
-                        <div class="detail-label">最後入庫日</div>
-                        <div class="detail-value" id="detail-inbound-date">---</div>
-                    </div>
+        
+        <div class="overflow-y-auto p-4 space-y-4 flex-grow">
+            
+            <!-- 基本資訊卡片 -->
+            <div class="bg-white p-5 rounded-xl shadow-md space-y-3">
+                <h3 class="text-lg font-semibold text-gray-700 mb-3">基本資訊與編輯</h3>
+                
+                <p class="text-sm text-gray-500 font-mono truncate">料號 (ID): <span id="detail-id" class="text-gray-800 font-bold">---</span></p>
+
+                <div>
+                    <label class="text-sm font-medium text-gray-600 block mb-1">品名</label>
+                    <input type="text" id="detail-name" onchange="updateDetailInfo()"
+                        placeholder="輸入商品名稱"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:border-indigo-500"
+                    />
                 </div>
 
-                <div style="margin-bottom:10px;">
-                    <div class="detail-label">品名</div>
-                    <input type="text" id="detail-name" onchange="updateDetailInfo('name')">
+                <div>
+                    <label class="text-sm font-medium text-gray-600 block mb-1">存放位置</label>
+                    <input type="text" id="detail-location" onchange="updateDetailInfo()"
+                        placeholder="例如: A架-3層"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:border-indigo-500"
+                    />
                 </div>
-
-                <div style="margin-bottom:10px;">
-                    <div class="detail-label">存放位置</div>
-                    <input type="text" id="detail-location" placeholder="例如：A架-3層"
-                           onchange="updateDetailInfo('location')">
+                
+                <p class="text-sm text-gray-500">最後入庫日: <span id="detail-inbound-date" class="text-gray-800">---</span></p>
+            </div>
+            
+            <!-- 庫存調整卡片 -->
+            <div class="bg-white p-5 rounded-xl shadow-md space-y-3">
+                <h3 class="text-lg font-semibold text-gray-700">手動調整庫存</h3>
+                <div class="flex items-center justify-between bg-indigo-50 p-3 rounded-lg">
+                    <span class="text-indigo-700 font-medium">調整為此數量:</span>
+                    <input type="number" id="detail-qty-input" value="0" min="0" inputmode="numeric"
+                        class="w-24 p-2 border-2 border-indigo-300 rounded-lg text-center font-bold text-xl"
+                    />
                 </div>
-
-                <h3 style="margin-top:4px; border-top:1px solid #e5e7eb; padding-top:8px; font-size:0.98rem;">
-                    庫存編輯
-                </h3>
-                <div style="margin-bottom:8px;">
-                    <div class="detail-label">手動調整至此數量</div>
-                    <input type="number" id="detail-qty-input" class="qty-input" min="0">
-                </div>
-                <button class="btn btn-in" style="width:100%;" type="button" onclick="updateDetailQty()">手動調整並儲存
+                
+                <button onclick="handleManualUpdate()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg transition mt-2">
+                    儲存並調整庫存
                 </button>
-                <p class="helper-text">會自動紀錄一筆「手動入庫 / 手動出庫」異動。</p>
             </div>
 
-            <div class="card">
-                <h3 style="margin-top:0; font-size:0.98rem;">🚚 進出貨歷史紀錄</h3>
-                <ul class="history-list" id="detail-history-list">
-                    <li style="text-align:center; color:#94a3b8; padding:16px;">載入中...</li>
+            <!-- 歷史紀錄卡片 -->
+            <div class="bg-white p-5 rounded-xl shadow-md">
+                <h3 class="text-lg font-semibold text-gray-700 mb-3 border-b pb-2">🚚 進出貨歷史紀錄</h3>
+                <ul id="detail-history-list" class="space-y-2">
+                    <li class="text-center text-gray-500">載入中...</li>
                 </ul>
             </div>
+
         </div>
     </div>
 </div>
 
-<script>
-    // Firebase 初始化
-    const firebaseConfig = {
-        apiKey: "AIzaSyAUgk7DGfnCCt1-cTAhvD2Se4YZQEoXUE8",
-        authDomain: "qr-inventory-2e995.firebaseapp.com",
-        projectId: "qr-inventory-2e995",
-        storageBucket: "qr-inventory-2e995.firebasestorage.app",
-        messagingSenderId: "1041449207118",
-        appId: "1:1041449207118:web:d8c66fa15024471f0d0a1f",
-        measurementId: "G-YGQYMSS6E3"
-    };
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-    const ServerTimestamp = firebase.firestore.FieldValue.serverTimestamp();
+<!-- 錯誤訊息提示 -->
+<div id="error-banner" class="hidden" onclick="this.style.display='none'"></div>
 
-    let html5QrCode = null;
-    let currentId = null;
-    let isProcessing = false;
-    let allData = [];
-
-    function vibrate(pattern) {
-        if (navigator.vibrate) navigator.vibrate(pattern);
-    }
-
-    // 線上狀態燈
-    function updateStatusDot(isOnline) {
-        const dot = document.getElementById('status-light');
-        if (!dot) return;
-        dot.classList.toggle('online', !!isOnline);
-        dot.title = isOnline ? '線上 - 已連線' : '離線 - 無網路';
-    }
-
-    // 相機控制
-    async function startCamera() {
-        try {
-            if (!html5QrCode) {
-                html5QrCode = new Html5Qrcode("reader");
-            }
-            await html5QrCode.start(
-                {facingMode: "environment"},
-                {fps: 10, qrbox: {width: 250, height: 250}, aspectRatio: 1.0},
-                (text) => {
-                    if (currentId === text) return;
-                    vibrate([50]);
-                    currentId = text;
-                    fetchData(text);
-                },
-                (errorMessage) => {
-                    // 忽略掃不到的錯誤
-                }
-            );
-        } catch (err) {
-            console.log("Camera Error:", err);
-        }
-    }
-
-    async function stopCamera() {
-        try {
-            if (html5QrCode && html5QrCode._isScanning) {
-                await html5QrCode.stop();
-            }
-        } catch (err) {
-            console.log("Stop Camera Error:", err);
-        }
-    }
-
-    // 掃描到資料後更新畫面
-    function fetchData(id) {
-        document.getElementById('scan-result').style.display = 'block';
-        document.getElementById('res-id').innerText = id || '---';
-        document.getElementById('op-amount').value = 1;
-
-        db.collection("inventory").doc(id).onSnapshot(doc => {
-            if (doc.exists) {
-                const d = doc.data();
-                document.getElementById('res-qty').innerText = d.qty ?? 0;
-                document.getElementById('res-name').value = d.name || "";
-                document.getElementById('res-name').placeholder = "輸入或修改商品名稱";
-            } else {
-                document.getElementById('res-qty').innerText = 0;
-                document.getElementById('res-name').value = "";
-                document.getElementById('res-name').placeholder = "新商品 - 請輸入名稱";
-            }
-        });
-    }
-
-    // 入庫 / 出庫
-    function handleStock(direction) {
-        if (!currentId || isProcessing) return;
-        const amount = parseInt(document.getElementById('op-amount').value, 10);
-        if (isNaN(amount) || amount <= 0) {
-            alert("請輸入正確的異動數量");
-            return;
-        }
-
-        vibrate([30]);
-        isProcessing = true;
-        const change = amount * direction;
-        const docRef = db.collection("inventory").doc(currentId);
-        const batch = db.batch();
-        const name = document.getElementById('res-name').value || "未命名";
-
-        docRef.get().then(doc => {
-            const updateFields = {
-                name: name,
-                updatedAt: ServerTimestamp
-            };
-            if (direction > 0) {
-                updateFields.lastInboundDate = ServerTimestamp;
-            }
-
-            if (!doc.exists) {
-                batch.set(docRef, {
-                    id: currentId,
-                    qty: change > 0 ? change : 0,
-                    ...updateFields
-                });
-            } else {
-                batch.update(docRef, {
-                    qty: firebase.firestore.FieldValue.increment(change),
-                    ...updateFields
-                });
-            }
-
-            const logRef = db.collection("logs").doc();
-            batch.set(logRef, {
-                productId: currentId,
-                productName: name,
-                action: direction > 0 ? "入庫" : "出庫",
-                amount: amount,
-                timestamp: ServerTimestamp
-            });
-
-            return batch.commit();
-        }).then(() => {
-            vibrate([50, 50]);
-            document.getElementById('op-amount').value = 1;
-        }).catch(err => {
-            alert("交易失敗: " + err.message);
-        }).finally(() => {
-            isProcessing = false;
-        });
-    }
-
-    // 更新名稱
-    function updateInfo() {
-        if (!currentId) return;
-        db.collection("inventory").doc(currentId).set({
-            name: document.getElementById('res-name').value || "未命名",
-            id: currentId,
-            updatedAt: ServerTimestamp
-        }, {merge: true});
-    }
-
-    // 填入庫存按鈕
-    function fillMaxStock() {
-        const currentQty = parseInt(document.getElementById('res-qty').innerText || "0", 10);
-        document.getElementById('op-amount').value = currentQty || 0;
-        vibrate([50]);
-    }
-
-    // 庫存列表監聽
-    db.collection("inventory").onSnapshot(snap => {
-        allData = [];
-        snap.forEach(doc => allData.push({...doc.data(), id: doc.id}));
-        renderList(allData);
-    });
-
-    function formatDateField(field) {
-        if (field && typeof field.toDate === 'function') {
-            return field.toDate().toLocaleDateString();
-        }
-        return '無紀錄';
-    }
-
-    // 渲染庫存列表
-    function renderList(data) {
-        const container = document.getElementById('list-container');
-        if (!data || data.length === 0) {
-            container.innerHTML = "<div style='text-align:center;color:#94a3b8;padding:20px;'>目前沒有庫存資料</div>";
-            return;
-        }
-
-        container.innerHTML = data.map(item => {
-            const date = formatDateField(item.lastInboundDate);
-            const qty = item.qty ?? 0;
-            const qtyColor = qty < 5 ? 'var(--danger)' : 'var(--primary)';
-            const name = item.name || "未命名";
-            const id = item.id || "";
-
-            return `
-                <div class="list-item" onclick="showDetail('${id}')">
-                    <div class="list-main">
-                        <div class="list-title">${name} (${id})</div>
-                        <div class="list-sub">最後入庫：${date}</div>
-                    </div>
-                    <div class="list-qty" style="color:${qtyColor};">${qty}</div>
-                </div>
-            `;
-        }).join('');
-    }
-
-    // 搜尋過濾
-    function filterList() {
-        const keyword = (document.getElementById('search-input').value || "").trim().toLowerCase();
-        if (!keyword) {
-            renderList(allData);
-            return;
-        }
-        const filtered = allData.filter(item => {
-            const text = `${item.name || ''} ${item.id || ''}`.toLowerCase();
-            return text.includes(keyword);
-        });
-        renderList(filtered);
-    }
-
-    // 匯出 CSV
-    function exportToExcel() {
-        if (!allData || allData.length === 0) {
-            alert("目前沒有任何庫存資料可以匯出。");
-            return;
-        }
-
-        const header = ["ID", "品名", "數量", "最後入庫日", "存放位置"];
-        const rows = allData.map(item => {
-            const id = item.id || "";
-            const name = item.name || "";
-            const qty = item.qty ?? 0;
-            const date = formatDateField(item.lastInboundDate);
-            const location = item.location || "";
-            return [id, name, qty, date, location];
-        });
-
-        const escapeCSV = (val) => {
-            const str = String(val ?? "");
-            if (/[",\n]/.test(str)) {
-                return `"${str.replace(/"/g, '""')}"`;
-            }
-            return str;
-        };
-
-        let csv = header.map(escapeCSV).join(",") + "\n";
-        csv += rows.map(r => r.map(escapeCSV).join(",")).join("\n");
-
-        const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        const today = new Date().toISOString().slice(0, 10);
-        a.download = `inventory_${today}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
-
-    // 紀錄頁面
-    db.collection("logs").orderBy("timestamp", "desc").onSnapshot(snap => {
-        const container = document.getElementById('logs-container');
-        container.innerHTML = "";
-
-        if (snap.empty) {
-            container.innerHTML = "<div style='text-align:center; padding:20px; color:#94a3b8;'>目前沒有任何異動紀錄</div>";
-            return;
-        }
-
-        snap.forEach(doc => {
-            const d = doc.data();
-            const time = d.timestamp && typeof d.timestamp.toDate === 'function'
-                ? d.timestamp.toDate().toLocaleString()
-                : '處理中...';
-            const color = (d.action || "").includes('入庫') ? 'var(--success)' : 'var(--danger)';
-            const actionText = d.action || '';
-            const amount = d.amount ?? 0;
-
-            container.innerHTML += `
-                <div class="list-item">
-                    <div class="list-main">
-                        <div class="list-title">${d.productName || "未命名"}</div>
-                        <div class="list-sub">${time}</div>
-                    </div>
-                    <div style="text-align:right; font-size:0.88rem;">
-                        <span style="color:${color}; font-weight:bold;">${actionText} ${amount}</span>
-                    </div>
-                </div>
-            `;
-        });
-    });
-
-    // 詳細視窗
-    function showDetail(id) {
-        const modal = document.getElementById('detail-modal');
-        modal.classList.add('active');
-        document.body.style.overflow = 'hidden';
-
-        db.collection("inventory").doc(id).get().then(doc => {
-            if (!doc.exists) return;
-            const d = doc.data();
-            const dateStr = formatDateField(d.lastInboundDate);
-
-            document.getElementById('modal-title').innerText = d.name || "商品詳情";
-            document.getElementById('detail-id').innerText = d.id || id;
-            document.getElementById('detail-inbound-date').innerText = dateStr;
-            document.getElementById('detail-name').value = d.name || "";
-            document.getElementById('detail-location').value = d.location || "";
-            const qtyInput = document.getElementById('detail-qty-input');
-            qtyInput.value = d.qty ?? 0;
-            qtyInput.setAttribute('data-item-id', id);
-        });
-
-        db.collection("logs").where("productId", "==", id)
-            .orderBy("timestamp", "desc")
-            .limit(30)
-            .get()
-            .then(snapshot => {
-                const list = document.getElementById('detail-history-list');
-                list.innerHTML = "";
-                if (snapshot.empty) {
-                    list.innerHTML = `<li style="text-align:center; color:#94a3b8; padding:18px;">無歷史紀錄</li>`;
-                    return;
-                }
-                snapshot.forEach(doc => {
-                    const d = doc.data();
-                    const time = d.timestamp && typeof d.timestamp.toDate === 'function'
-                        ? d.timestamp.toDate().toLocaleString()
-                        : '處理中...';
-                    const color = (d.action || "").includes('入庫') ? 'var(--success)' : 'var(--danger)';
-                    const action = d.action || '';
-                    const amount = d.amount ?? 0;
-
-                    list.innerHTML += `
-                        <li class="history-item">
-                            <span class="history-time">${time}</span>
-                            <span style="color:${color}; font-weight:bold;">${action} ${amount}</span>
-                        </li>
-                    `;
-                });
-            })
-            .catch(error => {
-                console.error("Firestore Index Error:", error);
-                const list = document.getElementById('detail-history-list');
-                list.innerHTML =
-                    `<li style="color:var(--danger); padding:18px;">載入紀錄失敗，可能是索引尚未建立，請稍後再試。</li>`;
-            });
-    }
-
-    function updateDetailQty() {
-        const inputEl = document.getElementById('detail-qty-input');
-        const id = inputEl.getAttribute('data-item-id');
-        const newQty = parseInt(inputEl.value, 10);
-
-        if (!id || isProcessing) return;
-        if (isNaN(newQty) || newQty < 0) {
-            alert("數量必須是 0 或正整數");
-            return;
-        }
-
-        vibrate([30]);
-        isProcessing = true;
-
-        db.collection('inventory').doc(id).get().then(doc => {
-            const oldQty = doc.data()?.qty ?? 0;
-            const diff = newQty - oldQty;
-
-            if (diff === 0) {
-                alert("數量沒有變更");
-                return null;
-            }
-
-            const action = diff > 0 ? "手動入庫" : "手動出庫";
-            const amount = Math.abs(diff);
-
-            const batch = db.batch();
-            batch.update(doc.ref, {
-                qty: newQty,
-                updatedAt: ServerTimestamp
-            });
-
-            const logRef = db.collection("logs").doc();
-            batch.set(logRef, {
-                productId: id,
-                productName: document.getElementById('detail-name').value || "未命名",
-                action: action,
-                amount: amount,
-                timestamp: ServerTimestamp
-            });
-
-            return batch.commit();
-        }).then(result => {
-            if (result !== null) {
-                vibrate([50, 50, 50]);
-                alert("庫存調整成功！");
-                showDetail(id); // 重新更新畫面
-            }
-        }).catch(err => {
-            console.error("Manual Adjust Error:", err);
-            alert("調整失敗，請檢查網路或權限。");
-        }).finally(() => {
-            isProcessing = false;
-        });
-    }
-
-    function updateDetailInfo(field) {
-        const id = document.getElementById('detail-qty-input').getAttribute('data-item-id');
-        const value = document.getElementById(`detail-${field}`).value;
-        if (!id) return;
-        db.collection("inventory").doc(id).update({
-            [field]: value,
-            updatedAt: ServerTimestamp
-        });
-    }
-
-    function closeDetail() {
-        const modal = document.getElementById('detail-modal');
-        modal.classList.remove('active');
-        document.body.style.overflow = 'auto';
-    }
-
-    // 製作 QRCode
-    function makeQR() {
-        vibrate([50]);
-        const text = (document.getElementById('new-code').value || "").trim();
-        if (!text) {
-            alert("請先輸入商品編號");
-            return;
-        }
-
-        const qrcodeContainer = document.getElementById('qrcode');
-        qrcodeContainer.innerHTML = "";
-
-        if (typeof QRCode !== 'undefined') {
-            new QRCode(qrcodeContainer, {
-                text: text,
-                width: 128,
-                height: 128
-            });
-        } else {
-            alert("QRCode 模組載入失敗，請檢查網路。");
-        }
-    }
-
-    // View 切換
-    async function switchView(view) {
-        const sections = ['scan', 'list', 'logs', 'create'];
-        sections.forEach(v => {
-            const el = document.getElementById(`view-${v}`);
-            if (el) el.style.display = (v === view) ? 'block' : 'none';
-        });
-
-        document.querySelectorAll('.nav-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.view === view);
-        });
-
-        const main = document.getElementById('main-content-scroll');
-
-        if (view === 'scan') {
-            main.scrollTop = 0;
-            main.style.overflowY = 'auto';
-            await startCamera();
-        } else {
-            main.style.overflowY = 'auto';
-            await stopCamera();
-        }
-    }
-
-    // 初始化
-    document.addEventListener('DOMContentLoaded', () => {
-        updateStatusDot(navigator.onLine);
-        window.addEventListener('online', () => updateStatusDot(true));
-        window.addEventListener('offline', () => updateStatusDot(false));
-
-        document.querySelectorAll('.nav-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const view = btn.dataset.view;
-                switchView(view);
-            });
-        });
-
-        // 預設進入掃描頁
-        switchView('scan');
-    });
-</script>
 </body>
 </html>
