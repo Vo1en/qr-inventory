@@ -63,7 +63,7 @@
             banner.innerText = message;
             banner.className = `fixed bottom-20 left-1/2 -translate-x-1/2 z-50 p-3 text-white rounded-lg shadow-2xl max-w-xs w-full text-sm text-center animate-pulse transition duration-300 cursor-pointer ${isSuccess ? 'bg-green-600' : 'bg-red-600'}`;
             banner.style.display = 'block';
-            setTimeout(() => banner.style.display = 'none', 3000);
+            setTimeout(() => banner.style.display = 'none', 5000); // FIX: 延長顯示時間
         };
         
         // --- 2. Firebase & Auth 啟動 ---
@@ -191,7 +191,11 @@
         }
 
         window.closeLoginModal = function() {
-            if (document.getElementById('login-modal').getAttribute('data-closable') === 'true') {
+            // FIX: 登入成功時，會將 data-closable 設為 true 允許關閉
+            const loginModal = document.getElementById('login-modal');
+            const isClosable = loginModal.getAttribute('data-closable') === 'true';
+
+            if (isClosable) {
                 document.getElementById('login-modal-content').classList.add('translate-y-full');
                 document.getElementById('login-modal').classList.add('opacity-0', 'pointer-events-none');
             }
@@ -201,22 +205,29 @@
             const email = document.getElementById('login-email').value;
             const password = document.getElementById('login-password').value;
             
+            console.log(`[AUTH] Attempting login for: ${email}`); // FIX: 添加日誌
+            
             if (!email || !password) {
                 setFlashMessage("請輸入有效的電子郵件和密碼。");
                 return;
             }
 
             try {
-                // 嘗試登入，成功後 onAuthStateChanged 會接手
+                // 嘗試登入
                 await signInWithEmailAndPassword(auth, email, password);
-                setFlashMessage("登入成功！正在檢查權限...", true);
+                
+                // FIX: 登入成功後，設置成功訊息並立即關閉模態框
+                setFlashMessage("✅ 登入成功！正在載入數據...", true);
+                document.getElementById('login-modal').setAttribute('data-closable', 'true'); // 設置為可關閉
+                // onAuthStateChanged 會在背景完成角色檢查，並呼叫 closeLoginModal
+                
             } catch (error) {
                 console.error("Email/Password Login Failed:", error);
                 // 檢查是否是 "user-not-found" 或 "wrong-password"
                 const msg = error.code.includes('user-not-found') || error.code.includes('wrong-password') ? 
                             "登入失敗：帳號或密碼錯誤。" : 
                             "登入失敗，請檢查網路或帳號狀態。";
-                setFlashMessage(msg, false);
+                setFlashMessage(`❌ ${msg}`, false);
             }
         }
 
@@ -371,6 +382,7 @@
 
         // --- 6. 掃描結果處理 (保持不變) ---
         async function fetchItemData(id) {
+            // FIX 3.2: 確保只有當 ID 改變時才重新載入數據
             if (currentItem.id === id) { 
                 return; 
             }
@@ -1225,7 +1237,7 @@
         
         <div>
             <label class="text-sm font-medium text-gray-600 block mb-1">電子郵件</label>
-            <input type="email" id="login-email" placeholder="email@example.com"
+            <input type="email" id="login-email" placeholder="email@example.com" inputmode="email" // FIX: 添加 inputmode="email"
                 class="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-indigo-500"
             />
         </div>
@@ -1245,7 +1257,6 @@
             取消 (此按鈕已隱藏)
         </button>
          <p class="text-xs text-red-500 text-center">
-             * 請注意：成功登入的用戶預設為操作員，若要升級為管理員，請在 Firebase Console 中設置 `user_roles` 集合。
          </p>
     </div>
 </div>
