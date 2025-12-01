@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>終極庫存系統 V4.1 - 權限管理版</title>
+    <title>終極庫存系統 V4.2 - 登入強制版</title>
     
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -19,7 +19,7 @@
         // --- 1. 全域變數與初始化 ---
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         
-        // 修正：從全域變數獲取配置，並使用用戶提供的備份
+        // Firebase Configuration (Using provided or Canvas config)
         let firebaseConfig = {
             apiKey: "AIzaSyAUgk7DGfnCCt1-cTAhvD2Se4YZQEoXUE8",
             authDomain: "qr-inventory-2e995.firebaseapp.com",
@@ -38,7 +38,7 @@
             console.error("Failed to parse __firebase_config, using default.", e);
         }
         
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
+        // const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; // REMOVED: No more auto/token login
 
         let db;
         let auth;
@@ -76,8 +76,10 @@
                 // 登入邏輯
                 onAuthStateChanged(auth, async (user) => {
                     if (user) {
+                        // FIX 1: 確保所有登入的用戶都有權限，並檢查角色
                         userId = user.uid;
-                        await fetchAndSetUserRole(user.uid, user.isAnonymous);
+                        // 任何透過 Email/Password 登入的用戶，預設都是 staff，然後再檢查是否為 manager
+                        await fetchAndSetUserRole(user.uid, false); 
                         isAuthReady = true;
                         
                         document.getElementById('role-display').innerText = `角色: ${userRole === 'manager' ? '管理員' : '操作員'}`;
@@ -92,41 +94,36 @@
                         // 根據權限調整 UI
                         updateUIPermissions();
                     } else {
-                        // 嘗試使用自定義 Token 或匿名登入
-                        try {
-                            if (initialAuthToken) {
-                                await signInWithCustomToken(auth, initialAuthToken);
-                            } else {
-                                await signInAnonymously(auth);
-                            }
-                        } catch (error) {
-                            console.error("Authentication Fallback Error:", error);
-                            setFlashMessage("自動登入失敗，請手動登入。");
-                            // 顯示登入介面
-                            showLoginModal();
-                        }
+                        // FIX 2: 移除所有匿名登入邏輯，強制顯示登入介面
+                        userId = null;
+                        isAuthReady = false;
+                        document.getElementById('role-display').innerText = `角色: 未登入`;
+                        document.getElementById('user-id-display').innerText = `ID: N/A`;
+                        document.getElementById('status-dot').className = 'w-3 h-3 rounded-full bg-red-400';
+                        // 鎖定 UI
+                        updateUIPermissions(true); 
+                        showLoginModal();
+                        stopCamera();
                     }
                 });
             } catch (e) {
                 console.error("Firebase Init Failed:", e);
                 setFlashMessage("系統初始化失敗。");
-                showLoginModal(); // 初始化失敗，直接顯示登入畫面
+                showLoginModal(); 
             }
         }
         
         /**
          * 根據 UID 獲取用戶角色，並設定全域 userRole
          * @param {string} uid 用戶 UID
-         * @param {boolean} isAnonymous 是否為匿名用戶
+         * @param {boolean} isAnonymous (Not used anymore, kept for signature consistency)
          */
-        async function fetchAndSetUserRole(uid, isAnonymous) {
-            if (isAnonymous) {
-                userRole = 'staff';
-                return;
-            }
+        async function fetchAndSetUserRole(uid) {
             
-            // 使用 public 集合儲存角色信息，方便管理員設定
-            // FIX: 修正公共資料路徑為 6 segments: artifacts/{appId}/public/data/user_roles/{uid}
+            // 預設為 Staff，因為用戶已經通過 Email/Password 登入
+            userRole = 'staff'; 
+            
+            // 檢查是否為 Manager
             const rolePath = `artifacts/${appId}/public/data/user_roles`;
             const roleRef = doc(db, rolePath, uid);
 
@@ -134,50 +131,70 @@
                 const docSnap = await getDoc(roleRef);
                 if (docSnap.exists() && docSnap.data().role === 'manager') {
                     userRole = 'manager';
-                } else {
-                    // 如果沒有記錄或角色不是 manager，則為 staff
-                    userRole = 'staff'; 
                 }
             } catch (e) {
                 console.warn("Failed to fetch user role, defaulting to staff:", e);
-                userRole = 'staff';
+                // 即使獲取失敗，仍然保持 staff 身份
             }
         }
 
         /**
          * 根據 userRole 啟用或禁用 UI 元素
+         * @param {boolean} lockAll 是否鎖定所有功能 (用於未登入狀態)
          */
-        function updateUIPermissions() {
-            const isManager = userRole === 'manager';
+        function updateUIPermissions(lockAll = false) {
+            const isManager = userRole === 'manager' && !lockAll;
+            const isLoggedOut = lockAll;
             
+            // 鎖定所有導航按鈕
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.disabled = isLoggedOut;
+                btn.classList.toggle('opacity-50', isLoggedOut);
+            });
+
             // 1. 導航列按鈕 (製碼)
             const createBtn = document.querySelector('.nav-btn[data-view="create"]');
+            if (createBtn) createBtn.disabled = !isManager && !isLoggedOut;
             if (createBtn) createBtn.classList.toggle('opacity-50', !isManager);
-            
-            // 2. 詳情模態框的編輯功能
+
+            // 2. 詳情模態框的編輯功能 (確保按鈕存在)
+            const manualInboundBtn = document.getElementById('handle-manual-inbound-btn'); 
             const updateDetailBtn = document.getElementById('update-detail-btn');
             const manualAdjustBtn = document.getElementById('handle-manual-update-btn');
-            const manualInboundBtn = document.getElementById('handle-manual-inbound-btn'); // 新增
             
             if (updateDetailBtn) updateDetailBtn.disabled = !isManager;
             if (manualAdjustBtn) manualAdjustBtn.disabled = !isManager;
-            if (manualInboundBtn) manualInboundBtn.disabled = !isManager; // 禁用新增按鈕
+            if (manualInboundBtn) manualInboundBtn.disabled = !isManager;
+            
+            // 3. 掃描頁面的操作按鈕
+            const stockButtons = document.querySelectorAll('.stock-operation-button');
+            stockButtons.forEach(btn => btn.disabled = isLoggedOut);
 
-            // 提示
-            if (!isManager && currentView === 'create') {
+
+            // 4. 顯示權限不足提示
+            if (isLoggedOut) {
+                 document.getElementById('view-scan').innerHTML = `<div class="p-6 text-center text-red-600 font-bold bg-white rounded-xl shadow-lg mt-10">🔒 請登入以開始庫存操作。</div>`;
+                 document.getElementById('view-list').innerHTML = `<div class="p-6 text-center text-red-600 font-bold bg-white rounded-xl shadow-lg mt-10">🔒 請登入以查看庫存。</div>`;
+                 document.getElementById('view-logs').innerHTML = `<div class="p-6 text-center text-red-600 font-bold bg-white rounded-xl shadow-lg mt-10">🔒 請登入以查看紀錄。</div>`;
+            } else if (!isManager && currentView === 'create') {
                 document.getElementById('view-create').innerHTML = `<div class="p-6 text-center text-red-600 font-bold bg-white rounded-xl shadow-lg mt-10">🚫 權限不足：只有管理員才能進行標籤製碼。</div>`;
             }
         }
 
         // --- 3. 登入/登出功能 ---
         window.showLoginModal = function() {
+            // FIX: 在未登入時，模態框必須是不可關閉的
             document.getElementById('login-modal').classList.remove('opacity-0', 'pointer-events-none');
             document.getElementById('login-modal-content').classList.remove('translate-y-full');
+            document.getElementById('login-modal').setAttribute('data-closable', 'false'); // 禁用外部點擊關閉
+            document.querySelector('#login-modal button.text-sm').style.display = 'none'; // 隱藏取消按鈕
         }
 
         window.closeLoginModal = function() {
-            document.getElementById('login-modal-content').classList.add('translate-y-full');
-            document.getElementById('login-modal').classList.add('opacity-0', 'pointer-events-none');
+            if (document.getElementById('login-modal').getAttribute('data-closable') === 'true') {
+                document.getElementById('login-modal-content').classList.add('translate-y-full');
+                document.getElementById('login-modal').classList.add('opacity-0', 'pointer-events-none');
+            }
         }
         
         window.handleEmailPasswordLogin = async function() {
@@ -190,22 +207,25 @@
             }
 
             try {
-                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                // 嘗試登入，成功後 onAuthStateChanged 會接手
+                await signInWithEmailAndPassword(auth, email, password);
                 setFlashMessage("登入成功！正在檢查權限...", true);
-                // onAuthStateChanged 會自動處理後續的 role 檢查和 UI 更新
             } catch (error) {
                 console.error("Email/Password Login Failed:", error);
-                setFlashMessage("登入失敗：帳號或密碼錯誤。", false);
+                // 檢查是否是 "user-not-found" 或 "wrong-password"
+                const msg = error.code.includes('user-not-found') || error.code.includes('wrong-password') ? 
+                            "登入失敗：帳號或密碼錯誤。" : 
+                            "登入失敗，請檢查網路或帳號狀態。";
+                setFlashMessage(msg, false);
             }
         }
 
         window.handleLogout = async function() {
             stopCamera();
             try {
+                // FIX: 登出後，onAuthStateChanged 會觸發並顯示登入畫面
                 await signOut(auth);
                 setFlashMessage("已登出。");
-                // 重新導向到登入模式
-                window.location.reload(); 
             } catch (error) {
                 console.error("Logout Failed:", error);
                 setFlashMessage("登出失敗。", false);
@@ -258,8 +278,8 @@
         
         // --- 5. 掃描器控制 (優化: 繞過 facingMode 協商，直接使用 Device ID 啟動) ---
         async function startCamera() {
-            if (typeof window.Html5Qrcode === 'undefined') {
-                setFlashMessage("QR 掃描庫載入中，請稍候...");
+            if (typeof window.Html5Qrcode === 'undefined' || !isAuthReady) {
+                // 只有在登入完成後才嘗試啟動相機
                 return;
             }
             if (!html5QrCode) html5QrCode = new window.Html5Qrcode("scanner-container");
@@ -391,8 +411,8 @@
 
         // --- 7. 庫存操作 (入庫/出庫) (保持不變) ---
         async function handleStock(direction) {
-            if (!currentItem.id || !db || !userId) {
-                return setFlashMessage("請先掃描商品 ID。");
+            if (!currentItem.id || !db || !userId || !isAuthReady) {
+                return setFlashMessage("請先掃描商品 ID 或完成登入。", false);
             }
             // 權限檢查：操作員和管理員都可以執行
             if (userRole === 'unknown') {
@@ -529,6 +549,11 @@
             const container = document.getElementById('list-container');
             const searchTerm = document.getElementById('search-input').value.toLowerCase();
             
+            if (!isAuthReady) {
+                 // Prevent rendering when not authenticated
+                 return;
+            }
+
             const filteredData = data
                 .filter(item =>
                     item.id.toLowerCase().includes(searchTerm) ||
@@ -576,6 +601,10 @@
         }
 
         function renderLogs(logsData) {
+             if (!isAuthReady) {
+                 // Prevent rendering when not authenticated
+                 return;
+            }
             const container = document.getElementById('logs-container');
             if (logsData.length === 0) {
                 return container.innerHTML = `<p class="text-center text-gray-500 py-10">無歷史紀錄</p>`;
@@ -604,6 +633,8 @@
 
         // --- 9. 商品詳情模態框邏輯 (加入權限檢查) ---
         window.showDetailModal = async function(id) {
+            if (!isAuthReady) return setFlashMessage("請先登入。", false);
+
             const modal = document.getElementById('detail-modal');
             modal.classList.add('opacity-100', 'pointer-events-auto');
             document.getElementById('modal-content').classList.remove('translate-y-full');
@@ -772,6 +803,10 @@
         // --- 10. 輔助功能 ---
         window.switchView = function(view) {
             
+            if (!isAuthReady) {
+                return setFlashMessage("請先登入。", false);
+            }
+
             // 權限檢查：只有管理員才能進入製碼頁面
             if (view === 'create' && userRole !== 'manager') {
                 document.getElementById('view-create').innerHTML = `<div class="p-6 text-center text-red-600 font-bold bg-white rounded-xl shadow-lg mt-10">🚫 權限不足：只有管理員才能進行標籤製碼。</div>`;
@@ -921,7 +956,7 @@
 <div class="app-wrapper">
     <!-- Header -->
     <header class="flex-shrink-0 bg-indigo-700 text-white p-4 flex justify-between items-center shadow-lg">
-        <h1 class="text-xl font-bold tracking-wider">📦 終極庫存系統 V4.1</h1>
+        <h1 class="text-xl font-bold tracking-wider">📦 終極庫存系統 V4.2</h1>
         <div class="flex items-center space-x-3">
             <div class="text-xs text-right">
                 <span id="role-display" class="font-bold block">角色: 載入中...</span>
@@ -988,13 +1023,13 @@
                         <div class="grid grid-cols-2 gap-2 pt-1">
                             <button 
                                 onclick="handleStock(1)"
-                                class="bg-green-500 hover:bg-green-600 text-white font-extrabold py-2.5 rounded-xl shadow-md transition transform hover:scale-[1.01] text-sm"
+                                class="stock-operation-button bg-green-500 hover:bg-green-600 text-white font-extrabold py-2.5 rounded-xl shadow-md transition transform hover:scale-[1.01] text-sm"
                             >
                                 <span class="text-xl">+</span> 入庫
                             </button>
                             <button 
                                 onclick="handleStock(-1)"
-                                class="bg-red-500 hover:bg-red-600 text-white font-extrabold py-2.5 rounded-xl shadow-md transition transform hover:scale-[1.01] text-sm"
+                                class="stock-operation-button bg-red-500 hover:bg-red-600 text-white font-extrabold py-2.5 rounded-xl shadow-md transition transform hover:scale-[1.01] text-sm"
                             >
                                 <span class="text-xl">-</span> 出庫
                             </button>
@@ -1176,8 +1211,8 @@
 <!-- 登入模態框 (用於管理員登入) -->
 <div id="login-modal" class="fixed inset-0 z-[100] bg-black bg-opacity-80 transition-opacity duration-300 opacity-0 pointer-events-none flex justify-center items-center" onclick="if(event.target.id === 'login-modal') closeLoginModal()">
     <div id="login-modal-content" class="bg-white w-full max-w-sm rounded-xl shadow-2xl flex flex-col transition-transform duration-300 translate-y-full p-6 space-y-4">
-        <h2 class="text-2xl font-bold text-indigo-700 text-center">🔐 管理員登入</h2>
-        <p class="text-sm text-gray-600 text-center">請輸入您的電子郵件和密碼以獲取管理權限。</p>
+        <h2 class="text-2xl font-bold text-indigo-700 text-center">🔐 請登入</h2>
+        <p class="text-sm text-gray-600 text-center">請輸入您的電子郵件和密碼以進入系統。</p>
         
         <div>
             <label class="text-sm font-medium text-gray-600 block mb-1">電子郵件</label>
@@ -1194,14 +1229,14 @@
         </div>
 
         <button onclick="handleEmailPasswordLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg transition">
-            登入管理員帳號
+            登入
         </button>
 
         <button onclick="closeLoginModal()" class="w-full text-sm text-gray-500 hover:text-indigo-500 transition py-1">
-            取消 (以操作員身份繼續)
+            取消 (此按鈕已隱藏)
         </button>
          <p class="text-xs text-red-500 text-center">
-             * 請注意：您必須在 Firebase Console 中事先建立帳號並在 `user_roles` 集合中設置 `role: 'manager'` 才能獲取管理員權限。
+             * 請注意：成功登入的用戶預設為操作員，若要升級為管理員，請在 Firebase Console 中設置 `user_roles` 集合。
          </p>
     </div>
 </div>
