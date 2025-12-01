@@ -2,66 +2,162 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>雲端即時庫存系統</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>智慧庫存管理系統 Pro</title>
     
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
-
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
     <style>
-        body { font-family: 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
-        h2 { text-align: center; color: #333; }
-        .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        #reader { width: 100%; border-radius: 8px; overflow: hidden; }
-        button { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 5px; }
-        .btn-in { background-color: #4CAF50; color: white; }
-        .btn-out { background-color: #f44336; color: white; }
-        .btn-gen { background-color: #2196F3; color: white; }
-        input { padding: 10px; width: 70%; border: 1px solid #ddd; border-radius: 5px; }
-        .hidden { display: none; }
-        #scan-result { margin-top: 15px; padding: 15px; background: #e3f2fd; border-radius: 5px; text-align: center; }
-        #stock-display { font-size: 24px; font-weight: bold; color: #333; }
-        #qrcode-container { margin-top: 15px; display: flex; justify-content: center; }
-        ul { padding-left: 20px; }
-        li { margin-bottom: 5px; color: #555; }
-        .status-dot { height: 10px; width: 10px; background-color: #bbb; border-radius: 50%; display: inline-block; margin-right: 5px;}
-        .status-online { background-color: #4CAF50; }
+        :root {
+            --primary: #2563eb; /* 專業藍 */
+            --success: #10b981; /* 成功綠 */
+            --danger: #ef4444;  /* 警告紅 */
+            --bg: #f3f4f6;
+            --card: #ffffff;
+            --text: #1f2937;
+        }
+
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg); color: var(--text);
+            margin: 0; padding: 0; 
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .container { max-width: 600px; margin: 0 auto; padding: 16px; padding-bottom: 80px; }
+
+        /* 標題區 */
+        header { 
+            text-align: center; margin-bottom: 20px; 
+            background: var(--primary); color: white;
+            padding: 20px; border-radius: 0 0 20px 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        h1 { margin: 0; font-size: 1.5rem; font-weight: 700; }
+        .status-badge { font-size: 0.8rem; background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 20px; margin-top: 5px; display: inline-block;}
+
+        /* 卡片共用樣式 */
+        .card { 
+            background: var(--card); 
+            border-radius: 16px; 
+            padding: 20px; 
+            margin-bottom: 20px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05); 
+            transition: transform 0.2s;
+        }
+
+        /* 掃描器美化 */
+        #reader { 
+            width: 100%; border-radius: 12px; overflow: hidden; 
+            background: #000; min-height: 250px;
+        }
+        
+        /* 掃描結果區 */
+        .result-box { text-align: center; display: none; }
+        .result-box.active { display: block; animation: popIn 0.3s ease; }
+        @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        .big-number { font-size: 3rem; font-weight: 800; color: var(--primary); margin: 10px 0; }
+        .product-code { font-size: 1.2rem; color: #6b7280; font-family: monospace; }
+        
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
+        button { 
+            padding: 15px; border: none; border-radius: 12px; 
+            font-size: 1rem; font-weight: 600; cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        button:active { transform: scale(0.98); }
+        .btn-in { background: var(--success); color: white; }
+        .btn-out { background: var(--danger); color: white; }
+        .btn-update { background: var(--primary); color: white; width: 100%; margin-top: 10px;}
+
+        /* 輸入框美化 */
+        input[type="text"] {
+            width: 100%; padding: 12px; 
+            border: 2px solid #e5e7eb; border-radius: 10px;
+            box-sizing: border-box; font-size: 1rem; margin: 5px 0;
+            text-align: center;
+        }
+        input:focus { border-color: var(--primary); outline: none; }
+
+        /* 紀錄列表 */
+        .log-list { list-style: none; padding: 0; margin: 0; }
+        .log-item { 
+            padding: 12px 0; border-bottom: 1px solid #f3f4f6; 
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .log-item:last-child { border-bottom: none; }
+        .log-time { font-size: 0.8rem; color: #9ca3af; }
+        .log-action { font-weight: bold; }
+        .badge-in { color: var(--success); background: #d1fae5; padding: 2px 8px; border-radius: 6px; font-size: 0.8rem;}
+        .badge-out { color: var(--danger); background: #fee2e2; padding: 2px 8px; border-radius: 6px; font-size: 0.8rem;}
+
+        /* 導航切換 */
+        .nav-tabs { display: flex; justify-content: space-around; margin-bottom: 15px; }
+        .nav-btn { background: none; color: #9ca3af; box-shadow: none; padding: 10px; }
+        .nav-btn.active { color: var(--primary); border-bottom: 2px solid var(--primary); border-radius: 0; }
     </style>
 </head>
 <body>
 
-    <h2>📦 雲端庫存系統 <span id="status" class="status-dot"></span></h2>
+    <header>
+        <h1>📦 庫存管理 Pro</h1>
+        <span class="status-badge" id="conn-status">連線中...</span>
+    </header>
 
-    <div class="card">
-        <h3>1. 掃描貨物</h3>
-        <div id="reader"></div>
-        <div id="scan-result" class="hidden">
-            <p>商品 ID：<b id="product-id">---</b></p>
-            <p>雲端庫存：<span id="stock-display">讀取中...</span></p>
-            <hr>
-            <button class="btn-in" onclick="updateCloudStock(1)">+ 入庫</button>
-            <button class="btn-out" onclick="updateCloudStock(-1)">- 出庫</button>
+    <div class="container">
+        
+        <div class="nav-tabs">
+            <button class="nav-btn active" onclick="switchTab('scan')">掃描作業</button>
+            <button class="nav-btn" onclick="switchTab('logs')">進出紀錄</button>
+            <button class="nav-btn" onclick="switchTab('create')">新增標籤</button>
         </div>
-    </div>
 
-    <div class="card">
-        <h3>2. 製作新標籤</h3>
-        <input type="text" id="new-item-name" placeholder="輸入商品 ID (如: PROD-888)">
-        <button class="btn-gen" onclick="generateQR()">生成 QR Code</button>
-        <div id="qrcode-container"></div>
-    </div>
+        <div id="tab-scan">
+            <div class="card">
+                <div id="reader"></div>
+                <p style="text-align:center; color:#888; font-size:0.9rem; margin-top:10px;">請將鏡頭對準 QR Code</p>
+            </div>
 
-    <div class="card">
-        <h3>3. 即時庫存清單</h3>
-        <p style="font-size:12px; color:#888;">* 這裡的數據會自動同步</p>
-        <ul id="inventory-list"><li>正在連線至 Firebase...</li></ul>
+            <div id="scan-result" class="card result-box">
+                <div class="product-code" id="res-id">---</div>
+                <input type="text" id="res-name" placeholder="點此輸入商品名稱 (如: 螺絲)" onchange="updateProductName()">
+                <div class="big-number" id="res-qty">0</div>
+                <p style="color:#6b7280; font-size:0.8rem;">庫存數量</p>
+                
+                <div class="btn-group">
+                    <button class="btn-in" onclick="updateStock(1)">+ 入庫</button>
+                    <button class="btn-out" onclick="updateStock(-1)">- 出庫</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-logs" style="display:none;">
+            <div class="card">
+                <h3>📝 最近 20 筆異動</h3>
+                <ul class="log-list" id="log-list-container">
+                    <li style="text-align:center; color:#ccc;">載入中...</li>
+                </ul>
+            </div>
+        </div>
+
+        <div id="tab-create" style="display:none;">
+            <div class="card" style="text-align:center;">
+                <h3>🖨️ 製作標籤</h3>
+                <input type="text" id="new-code" placeholder="輸入編號 (如: A-001)">
+                <button class="btn-update" onclick="makeQR()">生成 QR Code</button>
+                <div id="qrcode" style="margin-top:20px; display:flex; justify-content:center;"></div>
+            </div>
+        </div>
+
     </div>
 
     <script>
-        // --- 1. Firebase 設定 (已填入你的資料) ---
+        // --- 設定與初始化 ---
+        // TODO: 請填入你的 Firebase Config
         const firebaseConfig = {
             apiKey: "AIzaSyAUgk7DGfnCCt1-cTAhvD2Se4YZQEoXUE8",
             authDomain: "qr-inventory-2e995.firebaseapp.com",
@@ -72,89 +168,143 @@
             measurementId: "G-YGQYMSS6E3"
         };
 
-        // 初始化 Firebase
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
+        document.getElementById('conn-status').innerText = "🟢 系統線上";
 
-        // 檢查連線狀態
-        document.getElementById('status').classList.add('status-online');
-        console.log("Firebase 連線成功！");
+        // --- 變數 ---
+        let currentId = null;
+        let isProcessing = false; // 防止重複點擊
 
-        // --- 2. 監聽資料庫變化 (Real-time Listener) ---
-        // 只要雲端資料一變，這裡馬上自動執行，更新列表
-        db.collection("inventory").onSnapshot((querySnapshot) => {
-            const list = document.getElementById('inventory-list');
-            list.innerHTML = ""; // 清空舊列表
-
-            querySnapshot.forEach((doc) => {
-                const data = doc.data();
-                const li = document.createElement('li');
-                li.innerHTML = `<b>${doc.id}</b> : ${data.qty} 個`;
-                list.appendChild(li);
-                
-                // 如果目前正在看這個商品，順便更新上方的顯示數字
-                if (currentScannedId === doc.id) {
-                    document.getElementById('stock-display').innerText = data.qty;
-                }
-            });
-
-            if(querySnapshot.empty){
-                list.innerHTML = "<li>目前無資料，請先掃描或新增。</li>";
-            }
+        // --- 1. 掃描邏輯 ---
+        const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250, aspectRatio: 1.0 });
+        
+        scanner.render((text) => {
+            if (currentId === text) return; // 避免重複讀取同一碼
+            
+            // 觸發震動 (如果支援)
+            if (navigator.vibrate) navigator.vibrate(50); 
+            
+            currentId = text;
+            fetchProductData(text);
         });
 
-        // --- 3. 掃碼邏輯 ---
-        let currentScannedId = null;
-        const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-
-        function onScanSuccess(decodedText) {
-            currentScannedId = decodedText;
-            document.getElementById('scan-result').classList.remove('hidden');
-            document.getElementById('product-id').innerText = decodedText;
-
-            // 查詢這個商品是否存在
-            const docRef = db.collection("inventory").doc(decodedText);
-            docRef.get().then((doc) => {
-                if (doc.exists) {
-                    document.getElementById('stock-display').innerText = doc.data().qty;
-                } else {
-                    document.getElementById('stock-display').innerText = "新商品 (0)";
-                    // 自動建立這個新商品檔案，預設 0
-                    docRef.set({ qty: 0 }); 
-                }
-            }).catch((error) => {
-                console.error("讀取錯誤:", error);
-                alert("讀取失敗，請確認你的 Firebase 有開啟 Test Mode");
-            });
-        }
-        
-        html5QrcodeScanner.render(onScanSuccess);
-
-        // --- 4. 更新庫存 (寫入資料庫) ---
-        function updateCloudStock(change) {
-            if (!currentScannedId) return;
-
-            const docRef = db.collection("inventory").doc(currentScannedId);
+        function fetchProductData(id) {
+            document.getElementById('scan-result').classList.add('active');
+            document.getElementById('res-id').innerText = id;
             
-            // 使用 increment 確保多人同時操作也不會算錯
-            docRef.update({
-                qty: firebase.firestore.FieldValue.increment(change)
-            }).catch((error) => {
-                console.error("更新失敗:", error);
-                alert("更新失敗！請檢查網路或權限。");
+            db.collection("inventory").doc(id).onSnapshot((doc) => {
+                if (doc.exists) {
+                    const data = doc.data();
+                    document.getElementById('res-qty').innerText = data.qty;
+                    document.getElementById('res-name').value = data.name || "";
+                } else {
+                    document.getElementById('res-qty').innerText = 0;
+                    document.getElementById('res-name').value = "";
+                    document.getElementById('res-name').placeholder = "新商品 - 請輸入名稱";
+                }
+            });
+            
+            // 為了讓使用者方便操作，掃到後可以考慮暫停掃描 (可選)
+            // scanner.pause(); 
+        }
+
+        // --- 2. 核心功能：更新庫存 + 寫入紀錄 ---
+        function updateStock(change) {
+            if (!currentId || isProcessing) return;
+            isProcessing = true; // 鎖定按鈕
+
+            const docRef = db.collection("inventory").doc(currentId);
+            const batch = db.batch(); // 使用 Batch 確保兩件事同時成功
+
+            // 1. 準備更新庫存
+            // 先檢查文件是否存在，不存在要 Set，存在要 Update
+            docRef.get().then((doc) => {
+                if (!doc.exists) {
+                    batch.set(docRef, { 
+                        qty: change > 0 ? change : 0, 
+                        name: document.getElementById('res-name').value || "未命名商品",
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                } else {
+                    batch.update(docRef, { 
+                        qty: firebase.firestore.FieldValue.increment(change),
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+
+                // 2. 準備寫入紀錄 (Logs)
+                const logRef = db.collection("logs").doc();
+                batch.set(logRef, {
+                    productId: currentId,
+                    productName: document.getElementById('res-name').value || "未命名",
+                    action: change > 0 ? "入庫" : "出庫",
+                    amount: Math.abs(change),
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+
+                // 3. 提交
+                return batch.commit();
+            }).then(() => {
+                console.log("更新成功");
+                if (navigator.vibrate) navigator.vibrate([50, 50]); // 成功雙震動
+            }).catch((err) => {
+                alert("錯誤: " + err.message);
+            }).finally(() => {
+                isProcessing = false; // 解鎖
             });
         }
 
-        // --- 5. 生成 QR Code ---
-        function generateQR() {
-            const text = document.getElementById('new-item-name').value;
-            if (!text) return alert("請輸入商品 ID");
-            document.getElementById('qrcode-container').innerHTML = "";
-            new QRCode(document.getElementById('qrcode-container'), {
-                text: text,
-                width: 128,
-                height: 128
+        // --- 3. 更新商品名稱 ---
+        function updateProductName() {
+            if(!currentId) return;
+            const newName = document.getElementById('res-name').value;
+            db.collection("inventory").doc(currentId).set({ name: newName }, { merge: true });
+        }
+
+        // --- 4. 生成 QR Code ---
+        function makeQR() {
+            const text = document.getElementById('new-code').value;
+            if (!text) return alert("請輸入編號");
+            const div = document.getElementById('qrcode');
+            div.innerHTML = "";
+            new QRCode(div, { text: text, width: 150, height: 150 });
+        }
+
+        // --- 5. 監聽紀錄 (即時列表) ---
+        // 注意：如果你看到 Console 報錯 Requires Index，請點擊連結建立索引
+        db.collection("logs")
+          .orderBy("timestamp", "desc")
+          .limit(20)
+          .onSnapshot((snapshot) => {
+              const list = document.getElementById('log-list-container');
+              list.innerHTML = "";
+              snapshot.forEach(doc => {
+                  const d = doc.data();
+                  const time = d.timestamp ? new Date(d.timestamp.toDate()).toLocaleString() : "剛剛";
+                  const badgeClass = d.action === "入庫" ? "badge-in" : "badge-out";
+                  
+                  list.innerHTML += `
+                    <li class="log-item">
+                        <div>
+                            <div style="font-weight:600;">${d.productName} <span style="font-size:0.8em; color:#888;">(${d.productId})</span></div>
+                            <div class="log-time">${time}</div>
+                        </div>
+                        <div class="log-action">
+                            <span class="${badgeClass}">${d.action}</span> 
+                            ${d.amount}
+                        </div>
+                    </li>`;
+              });
+          });
+
+        // --- UI 切換邏輯 ---
+        function switchTab(tabName) {
+            ['scan', 'logs', 'create'].forEach(t => {
+                document.getElementById('tab-' + t).style.display = (t === tabName) ? 'block' : 'none';
             });
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
         }
     </script>
 </body>
