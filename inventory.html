@@ -3,10 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>智慧庫存系統 Production</title>
+    <title>終極庫存系統 V3.0</title>
     
+    <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+    <!-- QR Code Core -->
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
@@ -29,10 +31,10 @@
         .status-dot { width: 8px; height: 8px; background: #ccc; border-radius: 50%; transition: background 0.3s; }
         .status-dot.online { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
 
-        /* Main Content - R1a FIX: 加大底部 padding */
+        /* Main Content - R1 FIX: 增大底部 padding 避免遮擋 */
         main { flex: 1; overflow-y: hidden; 
                overflow-x: hidden; padding: 15px; 
-               padding-bottom: 140px; /* 增加留白空間，解決遮擋問題 */
+               padding-bottom: 150px; /* 最終增大留白空間 */
                position: relative;
         }
         .card { background: var(--card); border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
@@ -55,25 +57,24 @@
         .btn { padding: 15px; border: none; border-radius: 10px; font-size: 1rem; font-weight: bold; color: white; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
         .btn-in { background: linear-gradient(135deg, #10b981, #059669); }
         .btn-out { background: linear-gradient(135deg, #ef4444, #dc2626); }
-        .btn-fill { background: #60a5fa; color: white; padding: 8px; font-size: 0.85rem; } /* R1b */
+        .btn-fill { background: #60a5fa; color: white; padding: 8px; font-size: 0.85rem; }
 
         /* 列表樣式 */
         .list-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f1f5f9; cursor: pointer; }
-        .list-item:hover { background-color: #f8fafc; }
-        .list-qty { font-size: 1.2rem; font-weight: 800; }
+        
+        /* 製碼頁面 (R2 FIX: 最終美化) */
+        .create-card { padding: 30px 15px; text-align: center; }
+        .create-card h3 { font-size: 1.3rem; margin-bottom: 25px; color: var(--primary); }
+        .qrcode-container-wrapper { display: flex; justify-content: center; margin-top: 25px;}
+        .qrcode-display { 
+            background: #ffffff; padding: 15px; border-radius: 12px; 
+            border: 2px dashed #e2e8f0; box-shadow: 0 4px 8px rgba(0,0,0,0.05); display: inline-block; 
+        }
+        .qrcode-display p { margin:0; font-size:0.9rem; color:#94a3b8; }
         
         /* 彈出視窗 */
         #detail-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 100; display: none; justify-content: center; align-items: flex-end; }
         .modal-content { transform: translateY(100%); transition: transform 0.3s ease-out; background: var(--bg); width: 100%; max-width: 450px; height: 90%; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; overflow: hidden; }
-        #detail-modal.active .modal-content { transform: translateY(0); }
-        .modal-header { background: var(--primary); color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; }
-        .modal-body { padding: 15px; overflow-y: auto; flex: 1; }
-
-        /* 製碼頁面 */
-        .create-card { padding: 30px 15px; text-align: center; }
-        .qrcode-container-wrapper { display: flex; justify-content: center; margin-top: 25px;}
-        .qrcode-display { background: #ffffff; padding: 15px; border-radius: 12px; border: 2px dashed #e2e8f0; box-shadow: 0 4px 8px rgba(0,0,0,0.05); display: inline-block; }
-        .qrcode-display p { margin:0; font-size:0.9rem; color:#94a3b8; }
     </style>
 </head>
 <body>
@@ -85,6 +86,7 @@
     </header>
 
     <main id="main-content-scroll">
+        <!-- 1. 掃描頁面 -->
         <div id="view-scan">
             <div class="card" style="padding:0; margin-bottom: 10px;">
                 <div id="camera-wrapper">
@@ -106,6 +108,7 @@
                     
                     <div style="display:flex; gap:8px; align-items:center;">
                         <input type="number" id="op-amount" class="qty-input" value="1" min="1" inputmode="numeric" style="margin-bottom:0; flex-grow:1;">
+                        <!-- R1b FIX: 填入庫存按鈕 -->
                         <button class="btn btn-fill" onclick="fillMaxStock()">填入庫存</button>
                     </div>
 
@@ -117,6 +120,7 @@
             </div>
         </div>
 
+        <!-- 2. 庫存列表頁面 -->
         <div id="view-list" style="display:none;">
             <div class="sticky-search">
                 <input type="text" id="search-input" placeholder="🔍 搜尋商品..." onkeyup="filterList()">
@@ -127,6 +131,7 @@
             </div>
         </div>
 
+        <!-- 3. 紀錄頁面 -->
         <div id="view-logs" style="display:none;">
             <div class="card">
                 <h3 style="margin-top:0; font-size:1.1rem;">📝 近期異動</h3>
@@ -134,6 +139,7 @@
             </div>
         </div>
 
+        <!-- 4. 製碼頁面 (R2 FIX: 視覺化改版) -->
         <div id="view-create" style="display:none;">
             <div class="card create-card">
                 <h3>🖨️ 標籤製作與列印</h3>
@@ -141,7 +147,7 @@
                 <button class="btn btn-gen" onclick="makeQR()">生成 QR Code</button>
                 <div class="qrcode-container-wrapper">
                     <div class="qrcode-display" id="qrcode">
-                        <p>將在此處生成標籤</p>
+                        <p>點擊生成，即可在此處列印標籤</p>
                     </div>
                 </div>
             </div>
@@ -156,6 +162,7 @@
     </nav>
 </div>
 
+<!-- 彈出視窗：商品詳情與手動編輯 -->
 <div id="detail-modal" onclick="if(event.target.id === 'detail-modal') closeDetail()">
     <div class="modal-content">
         <div class="modal-header">
@@ -171,7 +178,9 @@
                     <div><div class="detail-label">最後入庫日</div><div class="detail-value" id="detail-inbound-date">---</div></div>
                 </div>
                 <div style="margin-bottom:15px;"><div class="detail-label">品名</div><input type="text" id="detail-name" onchange="updateDetailInfo('name')"></div>
-                
+                <!-- 💡 建議新增：存放位置 -->
+                <div style="margin-bottom:15px;"><div class="detail-label">存放位置</div><input type="text" id="detail-location" placeholder="例如: A架-3層" onchange="updateDetailInfo('location')"></div>
+
                 <h3 style="margin-top:0; border-top: 1px solid #f1f5f9; padding-top:10px;">庫存編輯</h3>
                 <div style="margin-bottom:10px;"><div class="detail-label">手動調整至此數量</div><input type="number" id="detail-qty-input" class="qty-input" min="0"></div>
                 <button class="btn btn-in" style="width:100%;" onclick="updateDetailQty()">手動調整並儲存</button>
@@ -197,7 +206,7 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
-    const ServerTimestamp = firebase.firestore.FieldValue.serverTimestamp(); 
+    const ServerTimestamp = firebase.firestore.FieldValue.serverTimestamp();
     
     let html5QrCode; let currentId = null; let isProcessing = false; let allData = [];
 
@@ -261,23 +270,23 @@
     // R1b FIX: 填入當前庫存按鈕
     function fillMaxStock() {
         const currentQty = document.getElementById('res-qty').innerText;
-        document.getElementById('op-amount').value = parseInt(currentQty);
+        document.getElementById('op-amount').value = parseInt(currentQty) || 0;
         vibrate([50]);
     }
 
-    // --- 庫存列表 (Bug Fix 2: Date Logic) ---
+    // --- 庫存列表 (Bug Fix 1: Date Logic) ---
     db.collection("inventory").onSnapshot(snap => {
         allData = [];
         snap.forEach(doc => allData.push({ ...doc.data(), id: doc.id }));
         renderList(allData);
     });
 
-    // Bug Fix 2: 修正日期顯示
+    // Bug Fix 1: 修正日期顯示
     function renderList(data) {
         const container = document.getElementById('list-container');
         if(data.length === 0) return container.innerHTML = "<div style='text-align:center;color:#ccc'>無資料</div>";
         container.innerHTML = data.map(item => {
-            // Fix: 嚴格檢查並安全轉換日期
+            // FIX: 嚴格檢查並安全轉換日期
             const date = item.lastInboundDate?.toDate ? item.lastInboundDate.toDate().toLocaleDateString() : '無紀錄';
             const qtyColor = item.qty < 5 ? 'var(--danger)' : 'var(--primary)';
             return `
@@ -338,6 +347,7 @@
             document.getElementById('detail-name').value = d.name || "";
             document.getElementById('detail-qty-input').value = d.qty;
             document.getElementById('detail-qty-input').setAttribute('data-item-id', id);
+            document.getElementById('detail-location').value = d.location || ""; // 讀取位置
         });
         
         db.collection("logs").where("productId", "==", id).orderBy("timestamp", "desc").limit(30).get().then(snapshot => {
@@ -404,6 +414,7 @@
         });
     }
 
+    // 更新名稱/位置
     function updateDetailInfo(field) { 
         const id = document.getElementById('detail-qty-input').getAttribute('data-item-id');
         const value = document.getElementById(`detail-${field}`).value;
