@@ -2,194 +2,703 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>終極庫存系統 V3.0</title>
-    
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>終極庫存系統 V3.1</title>
+
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
-    <!-- QR Code Core -->
+
+    <!-- QR Code 相關 -->
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
     <style>
         :root {
-            --primary: #2563eb; --success: #10b981; --danger: #ef4444; --bg: #f1f5f9;
-            --card: #ffffff; --nav-height: 70px; --header-height: 60px;
+            --primary: #2563eb;
+            --success: #10b981;
+            --danger: #ef4444;
+            --bg: #f1f5f9;
+            --card: #ffffff;
+            --nav-height: 68px;
+            --header-height: 60px;
         }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
-        body { 
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            outline: none;
+        }
+
+        body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #cbd5e1; margin: 0; padding: 0; height: 100vh; height: 100dvh; 
-            overflow: hidden; display: flex; justify-content: center;
+            background-color: #cbd5e1;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
         }
-        .app-wrapper { width: 100%; max-width: 480px; background-color: #f8fafc; height: 100%; display: flex; flex-direction: column; position: relative; box-shadow: 0 0 25px rgba(0,0,0,0.15); }
-        
-        /* Fixed Header */
-        header { flex: 0 0 var(--header-height); background: var(--primary); color: white; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 20; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        h1 { margin: 0; font-size: 1.1rem; font-weight: 700; letter-spacing: 1px; }
-        .status-dot { width: 8px; height: 8px; background: #ccc; border-radius: 50%; transition: background 0.3s; }
-        .status-dot.online { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
 
-        /* Main Content - R1 FIX: 增大底部 padding 避免遮擋 */
-        main { flex: 1; overflow-y: hidden; 
-               overflow-x: hidden; padding: 15px; 
-               padding-bottom: 150px; /* 最終增大留白空間 */
-               position: relative;
+        .app-wrapper {
+            width: 100%;
+            max-width: 480px;
+            background-color: #f8fafc;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            box-shadow: 0 0 25px rgba(0, 0, 0, 0.15);
         }
-        .card { background: var(--card); border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
 
-        /* Fixed Nav */
-        nav { flex: 0 0 var(--nav-height); background: white; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-around; align-items: center; z-index: 20; padding-bottom: env(safe-area-inset-bottom); }
-        .nav-btn { background: none; border: none; color: #94a3b8; font-size: 0.75rem; font-weight: 600; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 5px; width: 100%; height: 100%; cursor: pointer; }
-        .nav-btn.active { color: var(--primary); }
-        .nav-icon { font-size: 1.4rem; margin-bottom: 4px; }
+        /* Header */
+        header {
+            flex: 0 0 var(--header-height);
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            z-index: 20;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
 
-        /* 相機 */
-        #camera-wrapper { position: relative; border-radius: 12px; overflow: hidden; background: black; height: 280px; display: flex; align-items: center; justify-content: center; }
-        #reader video { object-fit: cover; width: 100% !important; height: 100% !important; border-radius: 12px; }
+        header h1 {
+            margin: 0;
+            font-size: 1.05rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
 
-        /* 輸入框與按鈕 */
-        input[type="text"], input[type="number"] { width: 100%; padding: 12px; text-align: center; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 1.1rem; margin: 8px 0; background: #f8fafc; }
-        .current-stock { font-size: 1.5rem; font-weight: 800; color: var(--primary); }
-        .action-area { background: #f1f5f9; padding: 15px; border-radius: 12px; margin-top: 10px; }
-        .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .btn { padding: 15px; border: none; border-radius: 10px; font-size: 1rem; font-weight: bold; color: white; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-        .btn-in { background: linear-gradient(135deg, #10b981, #059669); }
-        .btn-out { background: linear-gradient(135deg, #ef4444, #dc2626); }
-        .btn-fill { background: #60a5fa; color: white; padding: 8px; font-size: 0.85rem; }
+        header h1 span.logo {
+            font-size: 1.1rem;
+        }
+
+        .status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 999px;
+            background: #9ca3af;
+            box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .status-dot.online {
+            background: #4ade80;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.9);
+        }
+
+        /* Main 內容區 */
+        main {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 12px;
+            padding-bottom: 16px;
+            position: relative;
+        }
+
+        .card {
+            background: var(--card);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 14px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        /* 底部導覽列 */
+        nav {
+            flex: 0 0 var(--nav-height);
+            background: #ffffff;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            padding-bottom: env(safe-area-inset-bottom);
+            z-index: 20;
+        }
+
+        .nav-btn {
+            background: none;
+            border: none;
+            color: #94a3b8;
+            font-size: 0.78rem;
+            font-weight: 600;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 2px;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .nav-btn .nav-icon {
+            font-size: 1.35rem;
+            margin-bottom: 3px;
+        }
+
+        .nav-btn.active {
+            color: var(--primary);
+        }
+
+        .nav-btn.active .nav-icon {
+            transform: translateY(-1px);
+        }
+
+        /* 相機區塊 */
+        #camera-wrapper {
+            position: relative;
+            border-radius: 14px;
+            overflow: hidden;
+            background: #000;
+            height: 260px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #reader {
+            width: 100%;
+            height: 100%;
+        }
+
+        #reader video {
+            object-fit: cover;
+            width: 100% !important;
+            height: 100% !important;
+            border-radius: 14px;
+        }
+
+        /* 輸入 / 數量區塊 */
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 11px 10px;
+            text-align: center;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 1rem;
+            margin: 6px 0;
+            background: #f8fafc;
+        }
+
+        input[readonly] {
+            background: #e5e7eb;
+        }
+
+        .current-stock {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--primary);
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 6px;
+        }
+
+        .info-row-label {
+            font-size: 0.88rem;
+            color: #64748b;
+        }
+
+        .action-area {
+            background: #f1f5f9;
+            padding: 13px;
+            border-radius: 12px;
+            margin-top: 10px;
+        }
+
+        .btn-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 13px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: bold;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn span.sub {
+            font-size: 0.75rem;
+            font-weight: 500;
+            opacity: 0.9;
+        }
+
+        .btn-in {
+            background: linear-gradient(135deg, #10b981, #059669);
+        }
+
+        .btn-out {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+        }
+
+        .btn-fill {
+            background: #60a5fa;
+            color: white;
+            padding: 8px 10px;
+            font-size: 0.8rem;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .qty-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-top: 4px;
+        }
+
+        .qty-input-row input {
+            flex: 1;
+            margin: 0;
+        }
 
         /* 列表樣式 */
-        .list-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f1f5f9; cursor: pointer; }
-        
-        /* 製碼頁面 (R2 FIX: 最終美化) */
-        .create-card { padding: 30px 15px; text-align: center; }
-        .create-card h3 { font-size: 1.3rem; margin-bottom: 25px; color: var(--primary); }
-        .qrcode-container-wrapper { display: flex; justify-content: center; margin-top: 25px;}
-        .qrcode-display { 
-            background: #ffffff; padding: 15px; border-radius: 12px; 
-            border: 2px dashed #e2e8f0; box-shadow: 0 4px 8px rgba(0,0,0,0.05); display: inline-block; 
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 11px 4px;
+            border-bottom: 1px solid #f1f5f9;
+            cursor: pointer;
         }
-        .qrcode-display p { margin:0; font-size:0.9rem; color:#94a3b8; }
-        
-        /* 彈出視窗 */
-        #detail-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 100; display: none; justify-content: center; align-items: flex-end; }
-        .modal-content { transform: translateY(100%); transition: transform 0.3s ease-out; background: var(--bg); width: 100%; max-width: 450px; height: 90%; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; overflow: hidden; }
+
+        .list-item:last-child {
+            border-bottom: none;
+        }
+
+        .list-main {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .list-title {
+            font-weight: 600;
+            font-size: 0.92rem;
+            color: #0f172a;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .list-sub {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-top: 2px;
+        }
+
+        .list-qty {
+            font-size: 1.1rem;
+            font-weight: 700;
+            min-width: 42px;
+            text-align: right;
+        }
+
+        /* 搜尋 + 匯出 */
+        .sticky-search {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: #f8fafc;
+            padding-bottom: 6px;
+            margin-bottom: 6px;
+        }
+
+        .search-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        #search-input {
+            flex: 1;
+            margin: 0;
+            text-align: left;
+            font-size: 0.9rem;
+            padding-left: 12px;
+        }
+
+        .btn-export {
+            border-radius: 10px;
+            border: none;
+            padding: 9px 10px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: #0f172a;
+            color: #e5e7eb;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .btn-export span.icon {
+            font-size: 1rem;
+        }
+
+        /* 製碼頁面 */
+        .create-card {
+            padding: 22px 14px 26px;
+            text-align: center;
+        }
+
+        .create-card h3 {
+            font-size: 1.1rem;
+            margin-top: 0;
+            margin-bottom: 18px;
+            color: var(--primary);
+        }
+
+        .create-card input {
+            margin-bottom: 10px;
+        }
+
+        .btn-gen {
+            width: 100%;
+            margin-top: 4px;
+            background: linear-gradient(135deg, #6366f1, #2563eb);
+        }
+
+        .qrcode-container-wrapper {
+            display: flex;
+            justify-content: center;
+            margin-top: 18px;
+        }
+
+        .qrcode-display {
+            background: #ffffff;
+            padding: 14px;
+            border-radius: 12px;
+            border: 2px dashed #e2e8f0;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+            display: inline-block;
+            min-width: 150px;
+            min-height: 150px;
+        }
+
+        .qrcode-display p {
+            margin: 0;
+            font-size: 0.86rem;
+            color: #94a3b8;
+            text-align: center;
+        }
+
+        /* 詳細視窗 (底部滑出) */
+        #detail-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.55);
+            z-index: 100;
+            display: none;
+            justify-content: center;
+            align-items: flex-end;
+        }
+
+        #detail-modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg);
+            width: 100%;
+            max-width: 480px;
+            height: 90%;
+            border-radius: 20px 20px 0 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transform: translateY(100%);
+            transition: transform 0.25s ease-out;
+        }
+
+        #detail-modal.active .modal-content {
+            transform: translateY(0);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.02rem;
+        }
+
+        .modal-close-btn {
+            background: none;
+            border: none;
+            font-size: 1.6rem;
+            line-height: 1;
+            cursor: pointer;
+            color: #64748b;
+        }
+
+        .modal-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 10px 16px;
+        }
+
+        .detail-info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .detail-label {
+            font-size: 0.78rem;
+            color: #94a3b8;
+            margin-bottom: 2px;
+        }
+
+        .detail-value {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #1f2933;
+            word-break: break-all;
+        }
+
+        .history-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            max-height: 260px;
+            overflow-y: auto;
+        }
+
+        .history-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 0.8rem;
+        }
+
+        .history-item:last-child {
+            border-bottom: none;
+        }
+
+        .history-time {
+            color: #64748b;
+            margin-right: 8px;
+        }
+
+        /* 小提醒文字 */
+        .helper-text {
+            font-size: 0.75rem;
+            color: #9ca3af;
+            margin-top: 2px;
+        }
+
+        @media (max-height: 650px) {
+            #camera-wrapper {
+                height: 220px;
+            }
+        }
     </style>
 </head>
 <body>
-
 <div class="app-wrapper">
+
+    <!-- Header -->
     <header>
-        <h1>📦 庫存系統 Production</h1>
-        <div id="status-light" class="status-dot"></div>
+        <h1>
+            <span class="logo">📦</span>
+            終極庫存系統
+        </h1>
+        <div id="status-light" class="status-dot" title="連線狀態"></div>
     </header>
 
+    <!-- Main Content -->
     <main id="main-content-scroll">
+
         <!-- 1. 掃描頁面 -->
-        <div id="view-scan">
+        <section id="view-scan">
             <div class="card" style="padding:0; margin-bottom: 10px;">
                 <div id="camera-wrapper">
                     <div id="reader"></div>
                 </div>
             </div>
 
-            <div id="scan-result" class="card result-panel">
-                <div style="text-align:center; color:#94a3b8; font-family:monospace; margin-bottom:5px;" id="res-id">---</div>
-                <input type="text" id="res-name" placeholder="輸入商品名稱" onchange="updateInfo()">
-                
-                <div class="info-row" style="margin-bottom:0;">
-                    <span style="color:#64748b; font-size:0.9rem;">目前庫存</span>
-                    <span class="current-stock" id="res-qty">0</span>
+            <div id="scan-result" class="card">
+                <div id="res-id"
+                     style="text-align:center; color:#94a3b8; font-family:monospace; margin-bottom:6px;">請先掃描 QR
+                </div>
+
+                <input type="text" id="res-name" placeholder="輸入或修改商品名稱" onchange="updateInfo()">
+
+                <div class="info-row">
+                    <div class="info-row-label">目前庫存</div>
+                    <div class="current-stock" id="res-qty">0</div>
                 </div>
 
                 <div class="action-area">
-                    <div style="text-align:left; font-size:0.85rem; color:#64748b; margin-bottom:5px;">異動數量：</div>
-                    
-                    <div style="display:flex; gap:8px; align-items:center;">
-                        <input type="number" id="op-amount" class="qty-input" value="1" min="1" inputmode="numeric" style="margin-bottom:0; flex-grow:1;">
-                        <!-- R1b FIX: 填入庫存按鈕 -->
-                        <button class="btn btn-fill" onclick="fillMaxStock()">填入庫存</button>
+                    <div style="font-size:0.82rem; color:#64748b; margin-bottom:3px;">異動數量：</div>
+                    <div class="qty-input-row">
+                        <input type="number" id="op-amount" class="qty-input" value="1" min="1" inputmode="numeric">
+                        <button type="button" class="btn-fill" onclick="fillMaxStock()">填入庫存</button>
                     </div>
+                    <p class="helper-text">提示：出庫時可先按「填入庫存」，等於一次全數出貨。</p>
 
-                    <div class="btn-row" style="margin-top:15px;">
-                        <button class="btn btn-in" onclick="handleStock(1)">＋ 入庫</button>
-                        <button class="btn btn-out" onclick="handleStock(-1)">－ 出庫</button>
+                    <div class="btn-row" style="margin-top:12px;">
+                        <button class="btn btn-in" type="button" onclick="handleStock(1)">
+                            入庫
+                            <span class="sub">＋ 庫存增加</span>
+                        </button>
+                        <button class="btn btn-out" type="button" onclick="handleStock(-1)">
+                            出庫
+                            <span class="sub">－ 庫存減少</span>
+                        </button>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
         <!-- 2. 庫存列表頁面 -->
-        <div id="view-list" style="display:none;">
+        <section id="view-list" style="display:none;">
             <div class="sticky-search">
-                <input type="text" id="search-input" placeholder="🔍 搜尋商品..." onkeyup="filterList()">
-                <button class="btn btn-export" onclick="exportToExcel()"><span>📥</span> 匯出 Excel (CSV)</button>
+                <div class="search-row">
+                    <input type="text" id="search-input" placeholder="🔍 依名稱或料號搜尋..."
+                           onkeyup="filterList()">
+                    <button class="btn-export" type="button" onclick="exportToExcel()">
+                        <span class="icon">📥</span> 匯出
+                    </button>
+                </div>
             </div>
+
             <div class="card" id="list-container">
                 <div style="text-align:center; padding:20px; color:#94a3b8;">載入中...</div>
             </div>
-        </div>
+        </section>
 
         <!-- 3. 紀錄頁面 -->
-        <div id="view-logs" style="display:none;">
+        <section id="view-logs" style="display:none;">
             <div class="card">
-                <h3 style="margin-top:0; font-size:1.1rem;">📝 近期異動</h3>
-                <div id="logs-container"></div>
+                <h3 style="margin-top:0; font-size:1.02rem;">📝 近期異動紀錄</h3>
+                <div id="logs-container">
+                    <div style="text-align:center; padding:20px; color:#94a3b8;">載入中...</div>
+                </div>
             </div>
-        </div>
+        </section>
 
-        <!-- 4. 製碼頁面 (R2 FIX: 視覺化改版) -->
-        <div id="view-create" style="display:none;">
+        <!-- 4. 製碼頁面 -->
+        <section id="view-create" style="display:none;">
             <div class="card create-card">
-                <h3>🖨️ 標籤製作與列印</h3>
+                <h3>🏷️ 標籤製作與列印</h3>
                 <input type="text" id="new-code" placeholder="請輸入商品編號 (SKU)">
-                <button class="btn btn-gen" onclick="makeQR()">生成 QR Code</button>
+                <button class="btn btn-gen" type="button" onclick="makeQR()">生成 QR Code</button>
                 <div class="qrcode-container-wrapper">
                     <div class="qrcode-display" id="qrcode">
-                        <p>點擊生成，即可在此處列印標籤</p>
+                        <p>輸入編號並按下「生成」，即可在此列印標籤</p>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
+
     </main>
 
+    <!-- Nav -->
     <nav>
-        <button class="nav-btn active" onclick="switchView('scan')"><span class="nav-icon">📷</span>掃描</button>
-        <button class="nav-btn" onclick="switchView('list')"><span class="nav-icon">📦</span>庫存</button>
-        <button class="nav-btn" onclick="switchView('logs')"><span class="nav-icon">📝</span>紀錄</button>
-        <button class="nav-btn" onclick="switchView('create')"><span class="nav-icon">🏷️</span>製碼</button>
+        <button class="nav-btn active" type="button" data-view="scan">
+            <span class="nav-icon">📷</span>
+            掃描
+        </button>
+        <button class="nav-btn" type="button" data-view="list">
+            <span class="nav-icon">📦</span>
+            庫存
+        </button>
+        <button class="nav-btn" type="button" data-view="logs">
+            <span class="nav-icon">📝</span>
+            紀錄
+        </button>
+        <button class="nav-btn" type="button" data-view="create">
+            <span class="nav-icon">🏷️</span>
+            製碼
+        </button>
     </nav>
 </div>
 
-<!-- 彈出視窗：商品詳情與手動編輯 -->
-<div id="detail-modal" onclick="if(event.target.id === 'detail-modal') closeDetail()">
+<!-- 詳細彈窗 -->
+<div id="detail-modal" onclick="if (event.target.id === 'detail-modal') closeDetail()">
     <div class="modal-content">
         <div class="modal-header">
-            <h2 id="modal-title" style="font-size:1.2rem; margin:0;">商品詳情</h2>
-            <button class="modal-close-btn" onclick="closeDetail()">&times;</button>
+            <h2 id="modal-title">商品詳情</h2>
+            <button class="modal-close-btn" type="button" onclick="closeDetail()">&times;</button>
         </div>
         <div class="modal-body">
-            
-            <div class="card">
-                <h3 style="margin-top:0;">基本資訊</h3>
+            <div class="card" style="margin-bottom:10px;">
+                <h3 style="margin-top:0; font-size:0.98rem;">基本資訊</h3>
                 <div class="detail-info-grid">
-                    <div><div class="detail-label">料號 (ID)</div><div class="detail-value" id="detail-id">---</div></div>
-                    <div><div class="detail-label">最後入庫日</div><div class="detail-value" id="detail-inbound-date">---</div></div>
+                    <div>
+                        <div class="detail-label">料號 (ID)</div>
+                        <div class="detail-value" id="detail-id">---</div>
+                    </div>
+                    <div>
+                        <div class="detail-label">最後入庫日</div>
+                        <div class="detail-value" id="detail-inbound-date">---</div>
+                    </div>
                 </div>
-                <div style="margin-bottom:15px;"><div class="detail-label">品名</div><input type="text" id="detail-name" onchange="updateDetailInfo('name')"></div>
-                <!-- 💡 建議新增：存放位置 -->
-                <div style="margin-bottom:15px;"><div class="detail-label">存放位置</div><input type="text" id="detail-location" placeholder="例如: A架-3層" onchange="updateDetailInfo('location')"></div>
 
-                <h3 style="margin-top:0; border-top: 1px solid #f1f5f9; padding-top:10px;">庫存編輯</h3>
-                <div style="margin-bottom:10px;"><div class="detail-label">手動調整至此數量</div><input type="number" id="detail-qty-input" class="qty-input" min="0"></div>
-                <button class="btn btn-in" style="width:100%;" onclick="updateDetailQty()">手動調整並儲存</button>
+                <div style="margin-bottom:10px;">
+                    <div class="detail-label">品名</div>
+                    <input type="text" id="detail-name" onchange="updateDetailInfo('name')">
+                </div>
+
+                <div style="margin-bottom:10px;">
+                    <div class="detail-label">存放位置</div>
+                    <input type="text" id="detail-location" placeholder="例如：A架-3層"
+                           onchange="updateDetailInfo('location')">
+                </div>
+
+                <h3 style="margin-top:4px; border-top:1px solid #e5e7eb; padding-top:8px; font-size:0.98rem;">
+                    庫存編輯
+                </h3>
+                <div style="margin-bottom:8px;">
+                    <div class="detail-label">手動調整至此數量</div>
+                    <input type="number" id="detail-qty-input" class="qty-input" min="0">
+                </div>
+                <button class="btn btn-in" style="width:100%;" type="button" onclick="updateDetailQty()">手動調整並儲存
+                </button>
+                <p class="helper-text">會自動紀錄一筆「手動入庫 / 手動出庫」異動。</p>
             </div>
 
             <div class="card">
-                <h3 style="margin-top:0;">🚚 進出貨歷史紀錄</h3>
+                <h3 style="margin-top:0; font-size:0.98rem;">🚚 進出貨歷史紀錄</h3>
                 <ul class="history-list" id="detail-history-list">
-                    <li style="text-align:center; color:#94a3b8;">載入中...</li>
+                    <li style="text-align:center; color:#94a3b8; padding:16px;">載入中...</li>
                 </ul>
             </div>
         </div>
@@ -197,214 +706,398 @@
 </div>
 
 <script>
-    // --- Configs ---
+    // Firebase 初始化
     const firebaseConfig = {
-        apiKey: "AIzaSyAUgk7DGfnCCt1-cTAhvD2Se4YZQEoXUE8", authDomain: "qr-inventory-2e995.firebaseapp.com",
-        projectId: "qr-inventory-2e995", storageBucket: "qr-inventory-2e995.firebasestorage.app",
-        messagingSenderId: "1041449207118", appId: "1:1041449207118:web:d8c66fa15024471f0d0a1f", measurementId: "G-YGQYMSS6E3"
+        apiKey: "AIzaSyAUgk7DGfnCCt1-cTAhvD2Se4YZQEoXUE8",
+        authDomain: "qr-inventory-2e995.firebaseapp.com",
+        projectId: "qr-inventory-2e995",
+        storageBucket: "qr-inventory-2e995.firebasestorage.app",
+        messagingSenderId: "1041449207118",
+        appId: "1:1041449207118:web:d8c66fa15024471f0d0a1f",
+        measurementId: "G-YGQYMSS6E3"
     };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
-
     const ServerTimestamp = firebase.firestore.FieldValue.serverTimestamp();
-    
-    let html5QrCode; let currentId = null; let isProcessing = false; let allData = [];
 
-    function vibrate(p) { if(navigator.vibrate) navigator.vibrate(p); }
+    let html5QrCode = null;
+    let currentId = null;
+    let isProcessing = false;
+    let allData = [];
 
-    // --- 相機控制 ---
-    function startCamera() {
-        if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
-        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 }, (text) => {
-            if (currentId === text) return; vibrate([50]); currentId = text; fetchData(text);
-        }).catch(err => console.log("Camera Error", err));
+    function vibrate(pattern) {
+        if (navigator.vibrate) navigator.vibrate(pattern);
     }
-    function stopCamera() { if (html5QrCode && html5QrCode.isScanning) html5QrCode.stop(); }
 
+    // 線上狀態燈
+    function updateStatusDot(isOnline) {
+        const dot = document.getElementById('status-light');
+        if (!dot) return;
+        dot.classList.toggle('online', !!isOnline);
+        dot.title = isOnline ? '線上 - 已連線' : '離線 - 無網路';
+    }
+
+    // 相機控制
+    async function startCamera() {
+        try {
+            if (!html5QrCode) {
+                html5QrCode = new Html5Qrcode("reader");
+            }
+            await html5QrCode.start(
+                {facingMode: "environment"},
+                {fps: 10, qrbox: {width: 250, height: 250}, aspectRatio: 1.0},
+                (text) => {
+                    if (currentId === text) return;
+                    vibrate([50]);
+                    currentId = text;
+                    fetchData(text);
+                },
+                (errorMessage) => {
+                    // 忽略掃不到的錯誤
+                }
+            );
+        } catch (err) {
+            console.log("Camera Error:", err);
+        }
+    }
+
+    async function stopCamera() {
+        try {
+            if (html5QrCode && html5QrCode._isScanning) {
+                await html5QrCode.stop();
+            }
+        } catch (err) {
+            console.log("Stop Camera Error:", err);
+        }
+    }
+
+    // 掃描到資料後更新畫面
     function fetchData(id) {
         document.getElementById('scan-result').style.display = 'block';
-        document.getElementById('res-id').innerText = id;
+        document.getElementById('res-id').innerText = id || '---';
         document.getElementById('op-amount').value = 1;
+
         db.collection("inventory").doc(id).onSnapshot(doc => {
             if (doc.exists) {
                 const d = doc.data();
-                document.getElementById('res-qty').innerText = d.qty;
+                document.getElementById('res-qty').innerText = d.qty ?? 0;
                 document.getElementById('res-name').value = d.name || "";
+                document.getElementById('res-name').placeholder = "輸入或修改商品名稱";
             } else {
                 document.getElementById('res-qty').innerText = 0;
                 document.getElementById('res-name').value = "";
-                document.getElementById('res-name').placeholder = "新商品 - 請命名";
+                document.getElementById('res-name').placeholder = "新商品 - 請輸入名稱";
             }
         });
     }
 
+    // 入庫 / 出庫
     function handleStock(direction) {
         if (!currentId || isProcessing) return;
-        const amount = parseInt(document.getElementById('op-amount').value);
-        if (isNaN(amount) || amount <= 0) return alert("請輸入正確數量");
-        
-        vibrate([30]); isProcessing = true;
+        const amount = parseInt(document.getElementById('op-amount').value, 10);
+        if (isNaN(amount) || amount <= 0) {
+            alert("請輸入正確的異動數量");
+            return;
+        }
+
+        vibrate([30]);
+        isProcessing = true;
         const change = amount * direction;
         const docRef = db.collection("inventory").doc(currentId);
         const batch = db.batch();
         const name = document.getElementById('res-name').value || "未命名";
 
         docRef.get().then(doc => {
-            const updateFields = { name: name, updatedAt: ServerTimestamp };
-            if (direction > 0) updateFields.lastInboundDate = ServerTimestamp;
-            
-            if (!doc.exists) {
-                batch.set(docRef, { qty: change>0?change:0, id: currentId, ...updateFields });
-            } else {
-                batch.update(docRef, { qty: firebase.firestore.FieldValue.increment(change), ...updateFields });
+            const updateFields = {
+                name: name,
+                updatedAt: ServerTimestamp
+            };
+            if (direction > 0) {
+                updateFields.lastInboundDate = ServerTimestamp;
             }
-            
-            const logRef = db.collection("logs").doc();
-            batch.set(logRef, { productId: currentId, productName: name, action: direction>0?"入庫":"出庫", amount: amount, timestamp: ServerTimestamp });
-            return batch.commit();
-        }).then(() => { vibrate([50,50]); document.getElementById('op-amount').value = 1; })
-          .catch(err => alert("交易失敗: " + err.message)).finally(() => isProcessing = false);
-    }
-    function updateInfo() { if(currentId) db.collection("inventory").doc(currentId).set({ name: document.getElementById('res-name').value, id: currentId, updatedAt: ServerTimestamp }, { merge: true }); }
 
-    // R1b FIX: 填入當前庫存按鈕
+            if (!doc.exists) {
+                batch.set(docRef, {
+                    id: currentId,
+                    qty: change > 0 ? change : 0,
+                    ...updateFields
+                });
+            } else {
+                batch.update(docRef, {
+                    qty: firebase.firestore.FieldValue.increment(change),
+                    ...updateFields
+                });
+            }
+
+            const logRef = db.collection("logs").doc();
+            batch.set(logRef, {
+                productId: currentId,
+                productName: name,
+                action: direction > 0 ? "入庫" : "出庫",
+                amount: amount,
+                timestamp: ServerTimestamp
+            });
+
+            return batch.commit();
+        }).then(() => {
+            vibrate([50, 50]);
+            document.getElementById('op-amount').value = 1;
+        }).catch(err => {
+            alert("交易失敗: " + err.message);
+        }).finally(() => {
+            isProcessing = false;
+        });
+    }
+
+    // 更新名稱
+    function updateInfo() {
+        if (!currentId) return;
+        db.collection("inventory").doc(currentId).set({
+            name: document.getElementById('res-name').value || "未命名",
+            id: currentId,
+            updatedAt: ServerTimestamp
+        }, {merge: true});
+    }
+
+    // 填入庫存按鈕
     function fillMaxStock() {
-        const currentQty = document.getElementById('res-qty').innerText;
-        document.getElementById('op-amount').value = parseInt(currentQty) || 0;
+        const currentQty = parseInt(document.getElementById('res-qty').innerText || "0", 10);
+        document.getElementById('op-amount').value = currentQty || 0;
         vibrate([50]);
     }
 
-    // --- 庫存列表 (Bug Fix 1: Date Logic) ---
+    // 庫存列表監聽
     db.collection("inventory").onSnapshot(snap => {
         allData = [];
-        snap.forEach(doc => allData.push({ ...doc.data(), id: doc.id }));
+        snap.forEach(doc => allData.push({...doc.data(), id: doc.id}));
         renderList(allData);
     });
 
-    // Bug Fix 1: 修正日期顯示
+    function formatDateField(field) {
+        if (field && typeof field.toDate === 'function') {
+            return field.toDate().toLocaleDateString();
+        }
+        return '無紀錄';
+    }
+
+    // 渲染庫存列表
     function renderList(data) {
         const container = document.getElementById('list-container');
-        if(data.length === 0) return container.innerHTML = "<div style='text-align:center;color:#ccc'>無資料</div>";
+        if (!data || data.length === 0) {
+            container.innerHTML = "<div style='text-align:center;color:#94a3b8;padding:20px;'>目前沒有庫存資料</div>";
+            return;
+        }
+
         container.innerHTML = data.map(item => {
-            // FIX: 嚴格檢查並安全轉換日期
-            const date = item.lastInboundDate?.toDate ? item.lastInboundDate.toDate().toLocaleDateString() : '無紀錄';
-            const qtyColor = item.qty < 5 ? 'var(--danger)' : 'var(--primary)';
+            const date = formatDateField(item.lastInboundDate);
+            const qty = item.qty ?? 0;
+            const qtyColor = qty < 5 ? 'var(--danger)' : 'var(--primary)';
+            const name = item.name || "未命名";
+            const id = item.id || "";
+
             return `
-                <div class="list-item" onclick="showDetail('${item.id}')">
-                    <div style="flex:1;">
-                        <div style="font-weight:600;">${item.name || "未命名"} (${item.id})</div>
-                        <div style="font-size:0.75rem; color:#64748b;">最後入庫：${date}</div>
+                <div class="list-item" onclick="showDetail('${id}')">
+                    <div class="list-main">
+                        <div class="list-title">${name} (${id})</div>
+                        <div class="list-sub">最後入庫：${date}</div>
                     </div>
-                    <div class="list-qty" style="color:${qtyColor};">${item.qty}</div>
+                    <div class="list-qty" style="color:${qtyColor};">${qty}</div>
                 </div>
             `;
         }).join('');
     }
 
-    // --- 紀錄頁面 ---
+    // 搜尋過濾
+    function filterList() {
+        const keyword = (document.getElementById('search-input').value || "").trim().toLowerCase();
+        if (!keyword) {
+            renderList(allData);
+            return;
+        }
+        const filtered = allData.filter(item => {
+            const text = `${item.name || ''} ${item.id || ''}`.toLowerCase();
+            return text.includes(keyword);
+        });
+        renderList(filtered);
+    }
+
+    // 匯出 CSV
+    function exportToExcel() {
+        if (!allData || allData.length === 0) {
+            alert("目前沒有任何庫存資料可以匯出。");
+            return;
+        }
+
+        const header = ["ID", "品名", "數量", "最後入庫日", "存放位置"];
+        const rows = allData.map(item => {
+            const id = item.id || "";
+            const name = item.name || "";
+            const qty = item.qty ?? 0;
+            const date = formatDateField(item.lastInboundDate);
+            const location = item.location || "";
+            return [id, name, qty, date, location];
+        });
+
+        const escapeCSV = (val) => {
+            const str = String(val ?? "");
+            if (/[",\n]/.test(str)) {
+                return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+        };
+
+        let csv = header.map(escapeCSV).join(",") + "\n";
+        csv += rows.map(r => r.map(escapeCSV).join(",")).join("\n");
+
+        const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const today = new Date().toISOString().slice(0, 10);
+        a.download = `inventory_${today}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // 紀錄頁面
     db.collection("logs").orderBy("timestamp", "desc").onSnapshot(snap => {
         const container = document.getElementById('logs-container');
         container.innerHTML = "";
-        
+
         if (snap.empty) {
-            return container.innerHTML = "<div style='text-align:center; padding:20px; color:#94a3b8;'>無歷史紀錄</div>";
+            container.innerHTML = "<div style='text-align:center; padding:20px; color:#94a3b8;'>目前沒有任何異動紀錄</div>";
+            return;
         }
 
         snap.forEach(doc => {
             const d = doc.data();
-            const time = d.timestamp?.toDate ? d.timestamp.toDate().toLocaleString() : '處理中...';
-            const color = d.action.includes('入庫') ? 'var(--success)' : 'var(--danger)';
-            const actionText = d.action.includes('手動') ? d.action : d.action;
+            const time = d.timestamp && typeof d.timestamp.toDate === 'function'
+                ? d.timestamp.toDate().toLocaleString()
+                : '處理中...';
+            const color = (d.action || "").includes('入庫') ? 'var(--success)' : 'var(--danger)';
+            const actionText = d.action || '';
+            const amount = d.amount ?? 0;
 
             container.innerHTML += `
                 <div class="list-item">
-                    <div style="flex:1;">
-                        <div style="font-weight:600">${d.productName}</div>
-                        <div style="font-size:0.75rem; color:#94a3b8;">${time}</div>
+                    <div class="list-main">
+                        <div class="list-title">${d.productName || "未命名"}</div>
+                        <div class="list-sub">${time}</div>
                     </div>
-                    <div style="text-align:right;">
-                        <span style="color:${color}; font-weight:bold;">${actionText} ${d.amount}</span>
+                    <div style="text-align:right; font-size:0.88rem;">
+                        <span style="color:${color}; font-weight:bold;">${actionText} ${amount}</span>
                     </div>
                 </div>
             `;
         });
     });
 
-    // --- 商品詳情與編輯 ---
+    // 詳細視窗
     function showDetail(id) {
-        document.getElementById('detail-modal').style.display = 'flex';
-        setTimeout(() => document.getElementById('detail-modal').classList.add('active'), 10);
+        const modal = document.getElementById('detail-modal');
+        modal.classList.add('active');
         document.body.style.overflow = 'hidden';
 
         db.collection("inventory").doc(id).get().then(doc => {
             if (!doc.exists) return;
             const d = doc.data();
-            const dateStr = d.lastInboundDate?.toDate ? d.lastInboundDate.toDate().toLocaleDateString() : '無紀錄';
-            
+            const dateStr = formatDateField(d.lastInboundDate);
+
             document.getElementById('modal-title').innerText = d.name || "商品詳情";
-            document.getElementById('detail-id').innerText = d.id;
+            document.getElementById('detail-id').innerText = d.id || id;
             document.getElementById('detail-inbound-date').innerText = dateStr;
             document.getElementById('detail-name').value = d.name || "";
-            document.getElementById('detail-qty-input').value = d.qty;
-            document.getElementById('detail-qty-input').setAttribute('data-item-id', id);
-            document.getElementById('detail-location').value = d.location || ""; // 讀取位置
+            document.getElementById('detail-location').value = d.location || "";
+            const qtyInput = document.getElementById('detail-qty-input');
+            qtyInput.value = d.qty ?? 0;
+            qtyInput.setAttribute('data-item-id', id);
         });
-        
-        db.collection("logs").where("productId", "==", id).orderBy("timestamp", "desc").limit(30).get().then(snapshot => {
-            const list = document.getElementById('detail-history-list');
-            list.innerHTML = "";
-            if (snapshot.empty) list.innerHTML = `<li style="text-align:center; color:#94a3b8; padding:20px;">無歷史紀錄</li>`;
-            
-            snapshot.forEach(doc => {
-                const d = doc.data();
-                const time = d.timestamp?.toDate ? d.timestamp.toDate().toLocaleString() : '處理中...';
-                const color = d.action.includes('入庫') ? 'var(--success)' : 'var(--danger)';
-                list.innerHTML += `
-                    <li class="history-item">
-                        <span class="history-time">${time}</span>
-                        <span style="color:${color}; font-weight:bold;">${d.action} ${d.amount}</span>
-                    </li>
-                `;
+
+        db.collection("logs").where("productId", "==", id)
+            .orderBy("timestamp", "desc")
+            .limit(30)
+            .get()
+            .then(snapshot => {
+                const list = document.getElementById('detail-history-list');
+                list.innerHTML = "";
+                if (snapshot.empty) {
+                    list.innerHTML = `<li style="text-align:center; color:#94a3b8; padding:18px;">無歷史紀錄</li>`;
+                    return;
+                }
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    const time = d.timestamp && typeof d.timestamp.toDate === 'function'
+                        ? d.timestamp.toDate().toLocaleString()
+                        : '處理中...';
+                    const color = (d.action || "").includes('入庫') ? 'var(--success)' : 'var(--danger)';
+                    const action = d.action || '';
+                    const amount = d.amount ?? 0;
+
+                    list.innerHTML += `
+                        <li class="history-item">
+                            <span class="history-time">${time}</span>
+                            <span style="color:${color}; font-weight:bold;">${action} ${amount}</span>
+                        </li>
+                    `;
+                });
+            })
+            .catch(error => {
+                console.error("Firestore Index Error:", error);
+                const list = document.getElementById('detail-history-list');
+                list.innerHTML =
+                    `<li style="color:var(--danger); padding:18px;">載入紀錄失敗，可能是索引尚未建立，請稍後再試。</li>`;
             });
-        }).catch(error => {
-            console.error("Firestore Index Error:", error);
-            const list = document.getElementById('detail-history-list');
-            list.innerHTML = `<li style="color:var(--danger); padding:20px;">🚨 **載入紀錄失敗！** (請確認複合索引是否建立完成)</li>`;
-        });
     }
 
     function updateDetailQty() {
         const inputEl = document.getElementById('detail-qty-input');
         const id = inputEl.getAttribute('data-item-id');
-        const newQty = parseInt(inputEl.value);
-        
+        const newQty = parseInt(inputEl.value, 10);
+
         if (!id || isProcessing) return;
-        if (isNaN(newQty) || newQty < 0) return alert("數量必須是正數或零");
-        
-        vibrate([30]); isProcessing = true;
-        
+        if (isNaN(newQty) || newQty < 0) {
+            alert("數量必須是 0 或正整數");
+            return;
+        }
+
+        vibrate([30]);
+        isProcessing = true;
+
         db.collection('inventory').doc(id).get().then(doc => {
-            const oldQty = doc.data()?.qty || 0;
+            const oldQty = doc.data()?.qty ?? 0;
             const diff = newQty - oldQty;
-            
-            if (diff === 0) { alert("數量未變更"); return null; }
+
+            if (diff === 0) {
+                alert("數量沒有變更");
+                return null;
+            }
 
             const action = diff > 0 ? "手動入庫" : "手動出庫";
             const amount = Math.abs(diff);
 
             const batch = db.batch();
-            
-            batch.update(doc.ref, { qty: newQty, updatedAt: ServerTimestamp });
+            batch.update(doc.ref, {
+                qty: newQty,
+                updatedAt: ServerTimestamp
+            });
 
             const logRef = db.collection("logs").doc();
-            batch.set(logRef, { productId: id, productName: document.getElementById('detail-name').value, action: action, amount: amount, timestamp: ServerTimestamp });
+            batch.set(logRef, {
+                productId: id,
+                productName: document.getElementById('detail-name').value || "未命名",
+                action: action,
+                amount: amount,
+                timestamp: ServerTimestamp
+            });
 
             return batch.commit();
-        }).then((result) => {
-            if (result !== null) { 
+        }).then(result => {
+            if (result !== null) {
                 vibrate([50, 50, 50]);
                 alert("庫存調整成功！");
-                showDetail(id);
+                showDetail(id); // 重新更新畫面
             }
         }).catch(err => {
             console.error("Manual Adjust Error:", err);
@@ -414,66 +1107,85 @@
         });
     }
 
-    // 更新名稱/位置
-    function updateDetailInfo(field) { 
+    function updateDetailInfo(field) {
         const id = document.getElementById('detail-qty-input').getAttribute('data-item-id');
         const value = document.getElementById(`detail-${field}`).value;
-        if(id) db.collection("inventory").doc(id).update({ [field]: value, updatedAt: ServerTimestamp });
+        if (!id) return;
+        db.collection("inventory").doc(id).update({
+            [field]: value,
+            updatedAt: ServerTimestamp
+        });
     }
 
     function closeDetail() {
-        document.getElementById('detail-modal').classList.remove('active');
-        setTimeout(() => document.getElementById('detail-modal').style.display = 'none', 300); 
+        const modal = document.getElementById('detail-modal');
+        modal.classList.remove('active');
         document.body.style.overflow = 'auto';
     }
 
-    // --- 輔助功能 ---
+    // 製作 QRCode
     function makeQR() {
         vibrate([50]);
-        const text = document.getElementById('new-code').value;
-        if(!text) return;
-        
+        const text = (document.getElementById('new-code').value || "").trim();
+        if (!text) {
+            alert("請先輸入商品編號");
+            return;
+        }
+
         const qrcodeContainer = document.getElementById('qrcode');
-        qrcodeContainer.innerHTML = ""; 
+        qrcodeContainer.innerHTML = "";
 
         if (typeof QRCode !== 'undefined') {
-            new QRCode(qrcodeContainer, { text: text, width: 128, height: 128 });
+            new QRCode(qrcodeContainer, {
+                text: text,
+                width: 128,
+                height: 128
+            });
         } else {
-            alert("QRCode 元件載入失敗，請檢查網路。");
+            alert("QRCode 模組載入失敗，請檢查網路。");
         }
     }
 
-    function switchView(view) {
-        ['scan', 'list', 'logs', 'create'].forEach(v => document.getElementById('view-'+v).style.display = (v===view)?'block':'none');
-        document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-        event.currentTarget.classList.add('active');
-
-        const mainContent = document.getElementById('main-content-scroll');
-        if (view === 'scan') {
-            mainContent.style.overflowY = 'hidden'; 
-            setTimeout(startCamera, 300);
-        } else {
-            mainContent.style.overflowY = 'auto';
-            stopCamera();
-        }
-    }
-    
-    function filterList() { /* ... (Logic remains the same) ... */ }
-    function exportToExcel() { /* ... (Logic remains the same) ... */ }
-
-    // --- 初始化 ---
-    document.addEventListener('DOMContentLoaded', () => {
-        document.querySelector('.nav-btn[onclick*="scan"]').classList.add('active');
-        startCamera();
-        
-        document.querySelector('nav').addEventListener('click', (e) => {
-            const btn = e.target.closest('.nav-btn');
-            if (btn && btn.getAttribute('onclick')) {
-                eval(btn.getAttribute('onclick'));
-            }
+    // View 切換
+    async function switchView(view) {
+        const sections = ['scan', 'list', 'logs', 'create'];
+        sections.forEach(v => {
+            const el = document.getElementById(`view-${v}`);
+            if (el) el.style.display = (v === view) ? 'block' : 'none';
         });
-    });
 
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.view === view);
+        });
+
+        const main = document.getElementById('main-content-scroll');
+
+        if (view === 'scan') {
+            main.scrollTop = 0;
+            main.style.overflowY = 'auto';
+            await startCamera();
+        } else {
+            main.style.overflowY = 'auto';
+            await stopCamera();
+        }
+    }
+
+    // 初始化
+    document.addEventListener('DOMContentLoaded', () => {
+        updateStatusDot(navigator.onLine);
+        window.addEventListener('online', () => updateStatusDot(true));
+        window.addEventListener('offline', () => updateStatusDot(false));
+
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const view = btn.dataset.view;
+                switchView(view);
+            });
+        });
+
+        // 預設進入掃描頁
+        switchView('scan');
+    });
 </script>
 </body>
 </html>
