@@ -157,9 +157,11 @@
             // 2. 詳情模態框的編輯功能
             const updateDetailBtn = document.getElementById('update-detail-btn');
             const manualAdjustBtn = document.getElementById('handle-manual-update-btn');
+            const manualInboundBtn = document.getElementById('handle-manual-inbound-btn'); // 新增
             
             if (updateDetailBtn) updateDetailBtn.disabled = !isManager;
             if (manualAdjustBtn) manualAdjustBtn.disabled = !isManager;
+            if (manualInboundBtn) manualInboundBtn.disabled = !isManager; // 禁用新增按鈕
 
             // 提示
             if (!isManager && currentView === 'create') {
@@ -456,6 +458,71 @@
                 console.error("Transaction failed:", e);
             }
         }
+
+        // --- 7.5. 手動入庫功能 (新增) ---
+        window.handleManualInbound = async function() {
+             if (userRole !== 'manager') {
+                 return setFlashMessage("權限不足：您必須是管理員才能手動入庫。", false);
+            }
+            
+            const id = document.getElementById('detail-qty-input-id').value;
+            const inboundQty = parseInt(document.getElementById('manual-inbound-qty').value);
+            
+            if (!id || isNaN(inboundQty) || inboundQty <= 0) {
+                 return setFlashMessage("ID 或入庫數量無效！", false);
+            }
+
+            const inventoryPath = `/artifacts/${appId}/users/${userId}/inventory_v4`;
+            const logsPath = `/artifacts/${appId}/users/${userId}/logs_v4`;
+            const itemRef = doc(db, inventoryPath, id);
+            
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const itemDoc = await transaction.get(itemRef);
+                    const currentQty = itemDoc.exists() ? itemDoc.data().qty : 0;
+                    const newQty = currentQty + inboundQty;
+                    
+                    const name = itemDoc.exists() ? itemDoc.data().name : '未命名';
+                    const isNewItem = !itemDoc.exists();
+
+                    const updateFields = {
+                        name: name,
+                        qty: newQty,
+                        updatedAt: serverTimestamp(),
+                        lastInboundDate: serverTimestamp(),
+                        id: id,
+                    };
+
+                    if (isNewItem) {
+                         updateFields.createdAt = serverTimestamp();
+                         updateFields.location = ''; 
+                    }
+                    
+                    transaction.set(itemRef, updateFields, { merge: true });
+
+                    const logRef = doc(collection(db, logsPath));
+                    transaction.set(logRef, {
+                        productId: id,
+                        productName: name,
+                        action: "手動入庫",
+                        amount: inboundQty,
+                        timestamp: serverTimestamp(),
+                    });
+                });
+
+                vibrate([50, 50, 50]);
+                setFlashMessage(`手動入庫 ${inboundQty} 件成功！`, true);
+                
+                // 清空欄位並關閉模態框
+                document.getElementById('detail-qty-input-id').value = '';
+                document.getElementById('manual-inbound-qty').value = 1;
+                window.closeManualInboundModal();
+
+            } catch (e) {
+                setFlashMessage(e.message);
+                console.error("Manual Inbound Error:", e);
+            }
+        }
         
         // --- 8. 列表和紀錄渲染 (保持不變) ---
         function renderList(data) {
@@ -655,7 +722,7 @@
 
                     if (diff === 0) throw new Error("數量未變更");
 
-                    const action = diff > 0 ? "手動入庫" : "手動出庫";
+                    const action = diff > 0 ? "手動調整-入庫" : "手動調整-出庫"; // 區分調整類型
                     const amount = Math.abs(diff);
                     const name = document.getElementById('detail-name').value.trim() || '未命名';
                     
@@ -683,6 +750,24 @@
                 console.error("Manual Adjust Error:", e);
             }
         }
+
+        // --- 9.5. 手動入庫模態框控制 ---
+        window.showManualInboundModal = function() {
+            if (userRole !== 'manager') {
+                 return setFlashMessage("權限不足：您必須是管理員才能手動入庫。", false);
+            }
+            document.getElementById('manual-inbound-modal').classList.remove('opacity-0', 'pointer-events-none');
+            document.getElementById('manual-inbound-modal-content').classList.remove('translate-y-full');
+            document.getElementById('detail-qty-input-id').focus();
+        }
+
+        window.closeManualInboundModal = function() {
+            document.getElementById('manual-inbound-modal-content').classList.add('translate-y-full');
+            document.getElementById('manual-inbound-modal').classList.add('opacity-0', 'pointer-events-none');
+            document.getElementById('detail-qty-input-id').value = '';
+            document.getElementById('manual-inbound-qty').value = 1;
+        }
+
         
         // --- 10. 輔助功能 ---
         window.switchView = function(view) {
@@ -724,6 +809,68 @@
         }
         
         // ... (其他輔助功能保持不變)
+
+        window.filterList = function() {
+            renderList(allInventoryData);
+        }
+
+        window.fillMaxStock = function() {
+            const currentQty = parseInt(document.getElementById('res-qty').innerText) || 0;
+            document.getElementById('op-amount').value = currentQty;
+            vibrate([50]);
+        }
+        
+        window.makeQR = function() {
+            if (userRole !== 'manager') {
+                return setFlashMessage("權限不足：您必須是管理員才能製碼。", false);
+            }
+
+            vibrate([50]);
+            const text = document.getElementById('new-code').value;
+            if(!text) return;
+            
+            const qrcodeContainer = document.getElementById('qrcode-display-canvas');
+            if (typeof window.QRCode !== 'undefined') {
+                qrcodeContainer.innerHTML = '';
+                new window.QRCode(qrcodeContainer, {
+                    text: text,
+                    width: 150,
+                    height: 150,
+                    colorDark : "#0f172a",
+                    colorLight : "#ffffff",
+                    correctLevel : window.QRCode.CorrectLevel.H
+                });
+            } else {
+                setFlashMessage("QRCode 元件載入失敗，請檢查網路。");
+            }
+        }
+
+        window.exportToExcel = function() {
+            vibrate([50]);
+            if (allInventoryData.length === 0) return setFlashMessage("沒有庫存數據可匯出。");
+
+            const header = ["商品編號 (ID)", "品名", "庫存數量", "存放位置", "最後入庫日", "更新時間"].join(',');
+            const csvRows = allInventoryData.map(item => {
+                const lastInbound = item.lastInboundDate ? formatTimestamp(item.lastInboundDate) : '';
+                const updatedAt = item.updatedAt ? formatTimestamp(item.updatedAt) : '';
+                return [
+                    `"${item.id}"`,
+                    `"${item.name || '未命名'}"`,
+                    item.qty,
+                    `"${item.location || ''}"`,
+                    `"${updatedAt}"`
+                ].join(',');
+            });
+
+            const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + header + "\n" + csvRows.join('\n');
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `inventory_export_${new Date().toISOString().slice(0, 10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
 
         // --- 11. 應用程式啟動 ---
         document.addEventListener('DOMContentLoaded', initializeFirebase);
@@ -858,7 +1005,7 @@
             
         </div>
 
-        <!-- 2. 庫存列表頁面 (保持不變) -->
+        <!-- 2. 庫存列表頁面 (包含手動入庫按鈕) -->
         <div id="view-list" class="hidden h-full flex flex-col">
             <div class="sticky top-0 z-10 bg-gray-50 p-4 pb-2 shadow-inner border-b">
                 <input
@@ -868,12 +1015,20 @@
                     onkeyup="filterList()"
                     class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 transition mb-3"
                 />
-                <button 
-                    onclick="exportToExcel()"
-                    class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 rounded-lg shadow transition"
-                >
-                    📥 匯出 Excel (CSV)
-                </button>
+                <div class="grid grid-cols-2 gap-2">
+                    <button 
+                        onclick="showManualInboundModal()"
+                        class="manager-only-button bg-green-500 hover:bg-green-600 text-white font-bold py-2 rounded-lg shadow transition"
+                    >
+                        ➕ 手動入庫
+                    </button>
+                     <button 
+                        onclick="exportToExcel()"
+                        class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 rounded-lg shadow transition"
+                    >
+                        📥 匯出 Excel (CSV)
+                    </button>
+                </div>
             </div>
             
             <div id="list-container" class="flex-grow p-4 space-y-2">
@@ -993,7 +1148,7 @@
             
             <!-- 庫存調整卡片 -->
             <div class="bg-white p-5 rounded-xl shadow-md space-y-3">
-                <h3 class="text-lg font-semibold text-gray-700">手動調整庫存</h3>
+                <h3 class="text-lg font-semibold text-gray-700">手動調整庫存 (覆蓋總數)</h3>
                 <div class="flex items-center justify-between bg-indigo-50 p-3 rounded-lg">
                     <span class="text-indigo-700 font-medium">調整為此數量:</span>
                     <input type="number" id="detail-qty-input" value="0" min="0" inputmode="numeric"
@@ -1002,7 +1157,7 @@
                 </div>
                 
                 <button id="handle-manual-update-btn" onclick="handleManualUpdate()" class="manager-only-button w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg transition mt-2">
-                    儲存並調整庫存
+                    儲存並覆蓋庫存總數
                 </button>
             </div>
 
@@ -1048,6 +1203,36 @@
          <p class="text-xs text-red-500 text-center">
              * 請注意：您必須在 Firebase Console 中事先建立帳號並在 `user_roles` 集合中設置 `role: 'manager'` 才能獲取管理員權限。
          </p>
+    </div>
+</div>
+
+<!-- 模態框 (手動入庫) -->
+<div id="manual-inbound-modal" class="fixed inset-0 z-[60] bg-black bg-opacity-70 transition-opacity duration-300 opacity-0 pointer-events-none flex justify-center items-center" onclick="if(event.target.id === 'manual-inbound-modal') closeManualInboundModal()">
+    <div id="manual-inbound-modal-content" class="bg-white w-full max-w-sm rounded-xl shadow-2xl flex flex-col transition-transform duration-300 translate-y-full p-6 space-y-4">
+        <h2 class="text-2xl font-bold text-green-700 text-center border-b pb-2">➕ 手動入庫 (非掃描)</h2>
+        <p class="text-sm text-gray-600 text-center">適用於沒有 QR Code 或緊急入庫的情況。</p>
+        
+        <div>
+            <label class="text-sm font-medium text-gray-600 block mb-1">商品 ID (SKU)</label>
+            <input type="text" id="detail-qty-input-id" placeholder="請輸入商品 ID (必填)"
+                class="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-green-500 font-mono"
+            />
+        </div>
+        
+        <div>
+            <label class="text-sm font-medium text-gray-600 block mb-1">入庫數量</label>
+            <input type="number" id="manual-inbound-qty" value="1" min="1" inputmode="numeric"
+                class="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-green-500 text-center font-bold text-xl"
+            />
+        </div>
+
+        <button onclick="handleManualInbound()" id="manual-inbound-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl shadow-lg transition">
+            執行手動入庫
+        </button>
+         
+        <button onclick="closeManualInboundModal()" class="w-full text-sm text-gray-500 hover:text-red-500 transition py-1">
+            取消
+        </button>
     </div>
 </div>
 
