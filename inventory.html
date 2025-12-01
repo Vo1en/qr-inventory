@@ -112,7 +112,7 @@
             });
         }
         
-        // --- 4. 掃描器控制 (修正: 使用 getCameras() 確保設備存在) ---
+        // --- 4. 掃描器控制 (修正: 增強解析度並確保啟動穩定) ---
         async function startCamera() {
             if (typeof window.Html5Qrcode === 'undefined') {
                 setFlashMessage("QR 掃描庫載入中，請稍候...");
@@ -132,11 +132,13 @@
             const config = { fps: 10, qrbox: qrboxFunction };
             let cameraId = null;
             let cameraLabel = 'default';
+            let videoConstraints = {}; // 將用於 html5QrCode.start() 的第一個參數
 
             try {
                 // 1. 取得所有可用相機
                 const devices = await window.Html5Qrcode.getCameras();
                 if (devices && devices.length) {
+                    
                     // 2. 優先選擇後置鏡頭 (包含 'back', 'environment', 'external' 等關鍵字)
                     const environmentCam = devices.find(d => 
                         d.label.toLowerCase().includes('back') || 
@@ -148,16 +150,27 @@
                         cameraId = environmentCam.id;
                         cameraLabel = environmentCam.label;
                     } else {
-                        // 3. 否則使用第一個找到的設備 (通常是前置或預設)
+                        // 3. 否則使用第一個找到的設備
                         cameraId = devices[0].id;
                         cameraLabel = devices[0].label;
                     }
                     
                     if (scannerText) scannerText.innerText = `偵測到相機: ${cameraLabel}，正在啟動...`;
 
-                    // 4. 使用設備 ID 啟動掃描器
+                    // 4. 構造 Video Constraints，強制要求高解析度以提升掃描成功率
+                    videoConstraints = {
+                        // 確保使用正確的設備 ID
+                        deviceId: { exact: cameraId },
+                        // 優先使用後置鏡頭的 facingMode (如果已識別)
+                        facingMode: environmentCam ? "environment" : "user",
+                        // 設定高解析度偏好，以獲得更清晰的 QR 碼影像 (FIX: 提升解析度要求)
+                        width: { min: 1280, ideal: 1920 }, 
+                        height: { min: 720, ideal: 1080 }
+                    };
+
+                    // 5. 使用完整的 constraints 物件啟動掃描器
                     await html5QrCode.start(
-                        cameraId,
+                        videoConstraints, // 使用 constraints object 替代簡單的 deviceId string
                         config, 
                         (decodedText) => { vibrate([50]); fetchItemData(decodedText); },
                         (errorMessage) => { /* 忽略詳細錯誤 */ }
@@ -548,7 +561,7 @@
             const header = ["商品編號 (ID)", "品名", "庫存數量", "存放位置", "最後入庫日", "更新時間"].join(',');
             const csvRows = allInventoryData.map(item => {
                 const lastInbound = item.lastInboundDate ? formatTimestamp(item.lastInboundDate) : '';
-                const updatedAt = item.updatedAt ? formatTimestamp(item.updatedDate) : '';
+                const updatedAt = item.updatedAt ? formatTimestamp(item.updatedAt) : '';
                 return [
                     `"${item.id}"`,
                     `"${item.name || '未命名'}"`,
