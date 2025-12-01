@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>終極庫存系統 V4.0 - GitHub Ready</title>
+    <title>終極庫存系統 V5.0 - GitHub Ready</title>
     
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -18,8 +18,25 @@
         
         // --- 1. 全域變數與初始化 ---
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        // 修正錯誤：避免自我引用 'initialAuthToken'，檢查 __initial_auth_token 變數
+        // 修正：從全域變數獲取配置，並使用用戶提供的備份
+        let firebaseConfig = {
+            apiKey: "AIzaSyAUgk7DGfnCCt1-cTAhvD2Se4YZQEoXUE8",
+            authDomain: "qr-inventory-2e995.firebaseapp.com",
+            projectId: "qr-inventory-2e995",
+            storageBucket: "qr-inventory-2e995.firebasestorage.app",
+            messagingSenderId: "1041449207118",
+            appId: "1:1041449207118:web:d8c66fa15024471f0d0a1f",
+            measurementId: "G-YGQYMSS6E3"
+        };
+        try {
+            const canvasConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+            if (Object.keys(canvasConfig).length > 0) {
+                firebaseConfig = canvasConfig;
+            }
+        } catch(e) {
+            console.error("Failed to parse __firebase_config, using default.", e);
+        }
+        
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
 
         let db;
@@ -63,7 +80,7 @@
                         document.getElementById('status-dot').className = 'w-3 h-3 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]';
                         // 開始訂閱數據
                         setupFirestoreListeners();
-                        // 首次啟動相機 (FIX: 移除延遲，加快啟動)
+                        // 首次啟動相機
                         startCamera();
                     } else {
                         try {
@@ -120,6 +137,11 @@
             }
             if (!html5QrCode) html5QrCode = new window.Html5Qrcode("scanner-container");
             
+            // 檢查是否已經在掃描，如果是，則不做任何事
+            if (html5QrCode.isScanning) {
+                return;
+            }
+
             const scannerText = document.querySelector('#scanner-container p');
             if (scannerText) scannerText.innerText = "正在偵測可用相機...";
 
@@ -219,9 +241,11 @@
                 if (docSnap.exists()) {
                     currentItem = { id: docSnap.id, ...docSnap.data() };
                 } else {
+                    // 新商品
                     currentItem = { id: id, name: '', qty: 0, location: '' };
                 }
                 updateScanViewUI();
+                setFlashMessage(docSnap.exists() ? `成功載入商品: ${currentItem.name || '未命名'}` : `偵測到新商品 ID: ${currentItem.id}`, true);
             } catch (e) {
                 console.error("Fetch Item Error:", e);
                 setFlashMessage("讀取商品資訊失敗。");
@@ -234,19 +258,40 @@
             document.getElementById('res-name').placeholder = currentItem.id ? "輸入商品名稱 (失焦後儲存)" : "新商品 - 請命名";
             document.getElementById('res-qty').innerText = currentItem.qty;
             document.getElementById('op-amount').value = 1; // 重設操作數量
+            
+            // 確保切換到掃描頁面 (以防掃描器從其他頁面被觸發)
+            if (currentView !== 'scan') {
+                window.switchView('scan');
+            }
         }
 
         function handleNameUpdate() {
             if (!currentItem.id || !db) return;
-            const newName = document.getElementById('res-name').value;
+            const newName = document.getElementById('res-name').value.trim();
             if (newName === currentItem.name) return;
+            
+            // 如果名稱為空，則不更新（讓 Firestore 中的名稱保持原樣或為空）
+            if (newName === '') {
+                // 如果是新商品，也不更新
+                if (currentItem.qty === 0 && currentItem.name === '') return;
+            }
+
             currentItem.name = newName;
-            setDoc(doc(db, `/artifacts/${appId}/users/${userId}/inventory_v4`, currentItem.id), { name: newName, updatedAt: serverTimestamp() }, { merge: true });
+            
+            // 使用 setDoc 合併寫入，如果文件不存在，會自動創建 (但我們在 fetchItemData 已經處理了 ID)
+            setDoc(doc(db, `/artifacts/${appId}/users/${userId}/inventory_v4`, currentItem.id), { name: newName, updatedAt: serverTimestamp() }, { merge: true })
+                .then(() => setFlashMessage("名稱更新成功！", true))
+                .catch(e => {
+                    console.error("Name update failed:", e);
+                    setFlashMessage("名稱更新失敗！");
+                });
         }
 
         // --- 6. 庫存操作 (入庫/出庫) ---
         async function handleStock(direction) {
-            if (!currentItem.id || !db || !userId) return;
+            if (!currentItem.id || !db || !userId) {
+                return setFlashMessage("請先掃描商品 ID。");
+            }
             const opAmountEl = document.getElementById('op-amount');
             const amount = parseInt(opAmountEl.value);
             
@@ -265,16 +310,24 @@
 
                     if (newQty < 0) throw new Error("庫存不足，無法出庫！");
 
-                    const name = document.getElementById('res-name').value || '未命名';
+                    const name = document.getElementById('res-name').value.trim() || '未命名';
+                    const isNewItem = !itemDoc.exists();
+                    
                     const updateFields = {
                         name: name,
                         qty: newQty,
                         updatedAt: serverTimestamp(),
                         id: currentItem.id,
                     };
+                    
+                    if (isNewItem) {
+                         updateFields.createdAt = serverTimestamp();
+                         updateFields.location = ''; // 確保新商品有 location 欄位
+                    }
 
                     if (direction > 0) updateFields.lastInboundDate = serverTimestamp();
 
+                    // 使用 set() 搭配 {merge: true} 處理新增或更新
                     transaction.set(itemRef, updateFields, { merge: true });
 
                     // 寫入紀錄
@@ -286,11 +339,16 @@
                         amount: amount,
                         timestamp: serverTimestamp(),
                     });
+                    
+                    // 更新當前 UI 狀態
+                    currentItem.qty = newQty;
                 });
 
                 vibrate([50, 50]);
                 setFlashMessage("操作成功！庫存已更新。", true);
                 opAmountEl.value = 1;
+                // 即時更新掃描頁面上的數量顯示
+                document.getElementById('res-qty').innerText = currentItem.qty; 
             } catch (e) {
                 setFlashMessage(e.message);
                 vibrate([100, 100, 100]);
@@ -315,10 +373,23 @@
             }
 
             container.innerHTML = filteredData.map(item => {
-                const isLowStock = item.qty < 5;
+                const isLowStock = item.qty <= 5 && item.qty > 0; // 庫存 <= 5 且 > 0 視為低庫存
+                const isEmpty = item.qty === 0; // 庫存為 0
                 const dateStr = item.lastInboundDate ? formatTimestamp(item.lastInboundDate).split(' ')[0] : '無紀錄';
-                const colorClass = isLowStock ? 'text-red-500' : 'text-green-600';
-                const borderClass = isLowStock ? 'border-red-500' : 'border-green-500';
+                
+                let colorClass = 'text-gray-800';
+                let borderClass = 'border-gray-300';
+
+                if (isEmpty) {
+                    colorClass = 'text-red-500';
+                    borderClass = 'border-red-500';
+                } else if (isLowStock) {
+                    colorClass = 'text-orange-500';
+                    borderClass = 'border-orange-500';
+                } else {
+                    colorClass = 'text-green-600';
+                    borderClass = 'border-green-500';
+                }
 
                 return `
                     <div onclick="window.showDetailModal('${item.id}')"
@@ -326,7 +397,7 @@
                         <div class="flex flex-col flex-1 truncate">
                             <span class="font-semibold text-gray-800 truncate">${item.name || "未命名"}</span>
                             <span class="text-xs text-gray-500 font-mono">ID: ${item.id}</span>
-                            <span class="text-xs text-gray-500 mt-1">最後入庫: ${dateStr}</span>
+                            <span class="text-xs text-gray-500 mt-1">位置: ${item.location || '無'} | 最後入庫: ${dateStr}</span>
                         </div>
                         <div class="text-3xl font-extrabold ${colorClass}">
                             ${item.qty}
@@ -391,7 +462,8 @@
             const historyList = document.getElementById('detail-history-list');
             historyList.innerHTML = `<li class="text-center text-gray-500 py-4">載入中...</li>`;
             
-            const snapshot = await getDocs(detailLogsQuery); // 這裡使用 getDocs 替代 onSnapshot
+            // 使用 getDocs 獲取最新的歷史紀錄 (避免監聽器過多)
+            const snapshot = await getDocs(detailLogsQuery); 
             
             if (snapshot.empty) {
                 historyList.innerHTML = `<li class="text-center text-gray-500 py-4">無歷史紀錄</li>`;
@@ -423,8 +495,8 @@
         
         window.updateDetailInfo = async function() {
             const id = document.getElementById('detail-qty-input').getAttribute('data-item-id');
-            const name = document.getElementById('detail-name').value;
-            const location = document.getElementById('detail-location').value;
+            const name = document.getElementById('detail-name').value.trim();
+            const location = document.getElementById('detail-location').value.trim();
             
             if (!id || !db) return;
             
@@ -462,10 +534,12 @@
 
                     const action = diff > 0 ? "手動入庫" : "手動出庫";
                     const amount = Math.abs(diff);
-
+                    const name = document.getElementById('detail-name').value.trim() || '未命名';
+                    
                     // 更新商品基本資訊和庫存
                     transaction.update(itemRef, { 
                         qty: newQty, 
+                        name: name,
                         updatedAt: serverTimestamp() 
                     });
 
@@ -473,7 +547,7 @@
                     const logRef = doc(collection(db, logsPath));
                     transaction.set(logRef, {
                         productId: id,
-                        productName: document.getElementById('detail-name').value,
+                        productName: name,
                         action: action,
                         amount: amount,
                         timestamp: serverTimestamp(),
@@ -535,8 +609,11 @@
         
         window.makeQR = function() {
             vibrate([50]);
-            const text = document.getElementById('new-code').value;
-            if(!text) return;
+            const text = document.getElementById('new-code').value.trim();
+            if(!text) {
+                setFlashMessage("請輸入商品編號！");
+                return;
+            }
             
             const qrcodeContainer = document.getElementById('qrcode-display-canvas');
             if (typeof window.QRCode !== 'undefined') {
