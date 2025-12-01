@@ -62,8 +62,8 @@
                         document.getElementById('status-dot').className = 'w-3 h-3 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]';
                         // 開始訂閱數據
                         setupFirestoreListeners();
-                        // 首次啟動相機
-                        setTimeout(startCamera, 500);
+                        // 首次啟動相機 (FIX: 移除延遲，加快啟動)
+                        startCamera();
                     } else {
                         try {
                             if (initialAuthToken) {
@@ -193,6 +193,11 @@
 
         // --- 5. 掃描結果處理 ---
         async function fetchItemData(id) {
+            // FIX: 如果掃描到相同的ID，則不重複處理，避免重複震動和API呼叫
+            if (currentItem.id === id) { 
+                return; 
+            }
+            
             const docRef = doc(db, `/artifacts/${appId}/users/${userId}/inventory_v4`, id);
             
             try {
@@ -484,6 +489,9 @@
             document.querySelector(`.nav-btn[data-view="${view}"]`).classList.add('text-indigo-600');
 
             if (view === 'scan') {
+                // FIX: 確保切換到掃描頁面時，重設 currentItem，允許掃描同一個QR code
+                currentItem = { id: null, name: '', qty: 0, location: '' };
+                updateScanViewUI();
                 setTimeout(startCamera, 300);
             } else {
                 stopCamera();
