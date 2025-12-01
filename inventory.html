@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>智慧庫存管理系統 Pro</title>
+    <title>智慧庫存管理系統 Ultimate</title>
     
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
@@ -12,9 +12,10 @@
 
     <style>
         :root {
-            --primary: #2563eb; /* 專業藍 */
-            --success: #10b981; /* 成功綠 */
-            --danger: #ef4444;  /* 警告紅 */
+            --primary: #2563eb;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
             --bg: #f3f4f6;
             --card: #ffffff;
             --text: #1f2937;
@@ -29,7 +30,6 @@
 
         .container { max-width: 600px; margin: 0 auto; padding: 16px; padding-bottom: 80px; }
 
-        /* 標題區 */
         header { 
             text-align: center; margin-bottom: 20px; 
             background: var(--primary); color: white;
@@ -39,23 +39,14 @@
         h1 { margin: 0; font-size: 1.5rem; font-weight: 700; }
         .status-badge { font-size: 0.8rem; background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 20px; margin-top: 5px; display: inline-block;}
 
-        /* 卡片共用樣式 */
         .card { 
-            background: var(--card); 
-            border-radius: 16px; 
-            padding: 20px; 
-            margin-bottom: 20px; 
+            background: var(--card); border-radius: 16px; 
+            padding: 20px; margin-bottom: 20px; 
             box-shadow: 0 2px 10px rgba(0,0,0,0.05); 
-            transition: transform 0.2s;
         }
 
-        /* 掃描器美化 */
-        #reader { 
-            width: 100%; border-radius: 12px; overflow: hidden; 
-            background: #000; min-height: 250px;
-        }
+        #reader { width: 100%; border-radius: 12px; overflow: hidden; background: #000; min-height: 250px; }
         
-        /* 掃描結果區 */
         .result-box { text-align: center; display: none; }
         .result-box.active { display: block; animation: popIn 0.3s ease; }
         @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
@@ -63,18 +54,16 @@
         .big-number { font-size: 3rem; font-weight: 800; color: var(--primary); margin: 10px 0; }
         .product-code { font-size: 1.2rem; color: #6b7280; font-family: monospace; }
         
-        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
         button { 
             padding: 15px; border: none; border-radius: 12px; 
             font-size: 1rem; font-weight: 600; cursor: pointer;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
-        button:active { transform: scale(0.98); }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
         .btn-in { background: var(--success); color: white; }
         .btn-out { background: var(--danger); color: white; }
         .btn-update { background: var(--primary); color: white; width: 100%; margin-top: 10px;}
 
-        /* 輸入框美化 */
         input[type="text"] {
             width: 100%; padding: 12px; 
             border: 2px solid #e5e7eb; border-radius: 10px;
@@ -83,50 +72,58 @@
         }
         input:focus { border-color: var(--primary); outline: none; }
 
-        /* 紀錄列表 */
-        .log-list { list-style: none; padding: 0; margin: 0; }
-        .log-item { 
+        /* 列表樣式 */
+        .list-container { list-style: none; padding: 0; margin: 0; }
+        .list-item { 
             padding: 12px 0; border-bottom: 1px solid #f3f4f6; 
             display: flex; justify-content: space-between; align-items: center;
         }
-        .log-item:last-child { border-bottom: none; }
-        .log-time { font-size: 0.8rem; color: #9ca3af; }
-        .log-action { font-weight: bold; }
-        .badge-in { color: var(--success); background: #d1fae5; padding: 2px 8px; border-radius: 6px; font-size: 0.8rem;}
-        .badge-out { color: var(--danger); background: #fee2e2; padding: 2px 8px; border-radius: 6px; font-size: 0.8rem;}
+        .item-info { flex-grow: 1; text-align: left; }
+        .item-name { font-weight: 600; font-size: 1rem; }
+        .item-id { font-size: 0.8rem; color: #9ca3af; font-family: monospace; }
+        .item-qty { font-weight: 800; font-size: 1.2rem; color: var(--primary); }
+        .item-qty.low { color: var(--danger); } /* 低庫存警示 */
 
         /* 導航切換 */
-        .nav-tabs { display: flex; justify-content: space-around; margin-bottom: 15px; }
-        .nav-btn { background: none; color: #9ca3af; box-shadow: none; padding: 10px; }
-        .nav-btn.active { color: var(--primary); border-bottom: 2px solid var(--primary); border-radius: 0; }
+        .nav-tabs { 
+            display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; 
+            margin-bottom: 15px; background: white; padding: 5px; border-radius: 12px;
+        }
+        .nav-btn { 
+            background: none; color: #9ca3af; box-shadow: none; padding: 10px 5px; font-size: 0.9rem;
+        }
+        .nav-btn.active { 
+            color: var(--primary); background: #eff6ff; border-radius: 8px; font-weight: bold;
+        }
     </style>
 </head>
 <body>
 
     <header>
-        <h1>📦 庫存管理 Pro</h1>
+        <h1>📦 庫存管理系統</h1>
         <span class="status-badge" id="conn-status">連線中...</span>
     </header>
 
     <div class="container">
         
         <div class="nav-tabs">
-            <button class="nav-btn active" onclick="switchTab('scan')">掃描作業</button>
-            <button class="nav-btn" onclick="switchTab('logs')">進出紀錄</button>
-            <button class="nav-btn" onclick="switchTab('create')">新增標籤</button>
+            <button class="nav-btn active" onclick="switchTab('scan')">掃描</button>
+            <button class="nav-btn" onclick="switchTab('list')">庫存表</button>
+            <button class="nav-btn" onclick="switchTab('logs')">紀錄</button>
+            <button class="nav-btn" onclick="switchTab('create')">製碼</button>
         </div>
 
         <div id="tab-scan">
             <div class="card">
                 <div id="reader"></div>
-                <p style="text-align:center; color:#888; font-size:0.9rem; margin-top:10px;">請將鏡頭對準 QR Code</p>
+                <p style="text-align:center; color:#888; font-size:0.9rem; margin-top:10px;">對準 QR Code 自動識別</p>
             </div>
 
             <div id="scan-result" class="card result-box">
                 <div class="product-code" id="res-id">---</div>
-                <input type="text" id="res-name" placeholder="點此輸入商品名稱 (如: 螺絲)" onchange="updateProductName()">
+                <input type="text" id="res-name" placeholder="輸入名稱 (如: 螺絲)" onchange="updateProductName()">
                 <div class="big-number" id="res-qty">0</div>
-                <p style="color:#6b7280; font-size:0.8rem;">庫存數量</p>
+                <p style="color:#6b7280; font-size:0.8rem;">現有庫存</p>
                 
                 <div class="btn-group">
                     <button class="btn-in" onclick="updateStock(1)">+ 入庫</button>
@@ -135,10 +132,19 @@
             </div>
         </div>
 
+        <div id="tab-list" style="display:none;">
+            <div class="card">
+                <input type="text" id="search-input" placeholder="🔍 搜尋商品名稱或編號..." onkeyup="filterInventory()" style="margin-bottom: 15px;">
+                <ul class="list-container" id="inventory-full-list">
+                    <li style="text-align:center; color:#ccc;">載入中...</li>
+                </ul>
+            </div>
+        </div>
+
         <div id="tab-logs" style="display:none;">
             <div class="card">
-                <h3>📝 最近 20 筆異動</h3>
-                <ul class="log-list" id="log-list-container">
+                <h3>📝 近期 20 筆異動</h3>
+                <ul class="list-container" id="log-list-container">
                     <li style="text-align:center; color:#ccc;">載入中...</li>
                 </ul>
             </div>
@@ -157,7 +163,7 @@
 
     <script>
         // --- 設定與初始化 ---
-        // TODO: 請填入你的 Firebase Config
+        // 請確認這裡是你自己的 Firebase Config
         const firebaseConfig = {
             apiKey: "AIzaSyAUgk7DGfnCCt1-cTAhvD2Se4YZQEoXUE8",
             authDomain: "qr-inventory-2e995.firebaseapp.com",
@@ -172,19 +178,15 @@
         const db = firebase.firestore();
         document.getElementById('conn-status').innerText = "🟢 系統線上";
 
-        // --- 變數 ---
         let currentId = null;
-        let isProcessing = false; // 防止重複點擊
+        let isProcessing = false;
+        let allInventoryData = []; // 用來存所有商品以便搜尋
 
         // --- 1. 掃描邏輯 ---
         const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250, aspectRatio: 1.0 });
-        
         scanner.render((text) => {
-            if (currentId === text) return; // 避免重複讀取同一碼
-            
-            // 觸發震動 (如果支援)
-            if (navigator.vibrate) navigator.vibrate(50); 
-            
+            if (currentId === text) return;
+            if (navigator.vibrate) navigator.vibrate(50);
             currentId = text;
             fetchProductData(text);
         });
@@ -204,103 +206,139 @@
                     document.getElementById('res-name').placeholder = "新商品 - 請輸入名稱";
                 }
             });
-            
-            // 為了讓使用者方便操作，掃到後可以考慮暫停掃描 (可選)
-            // scanner.pause(); 
         }
 
-        // --- 2. 核心功能：更新庫存 + 寫入紀錄 ---
+        // --- 2. 更新庫存 & 寫入紀錄 ---
         function updateStock(change) {
             if (!currentId || isProcessing) return;
-            isProcessing = true; // 鎖定按鈕
+            isProcessing = true;
 
             const docRef = db.collection("inventory").doc(currentId);
-            const batch = db.batch(); // 使用 Batch 確保兩件事同時成功
+            const batch = db.batch();
 
-            // 1. 準備更新庫存
-            // 先檢查文件是否存在，不存在要 Set，存在要 Update
             docRef.get().then((doc) => {
+                const productName = document.getElementById('res-name').value || "未命名";
+                
                 if (!doc.exists) {
                     batch.set(docRef, { 
                         qty: change > 0 ? change : 0, 
-                        name: document.getElementById('res-name').value || "未命名商品",
+                        name: productName,
+                        id: currentId, // 儲存 ID 以便搜尋
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                 } else {
                     batch.update(docRef, { 
                         qty: firebase.firestore.FieldValue.increment(change),
+                        name: productName, // 順便更新名字
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                 }
 
-                // 2. 準備寫入紀錄 (Logs)
                 const logRef = db.collection("logs").doc();
                 batch.set(logRef, {
                     productId: currentId,
-                    productName: document.getElementById('res-name').value || "未命名",
+                    productName: productName,
                     action: change > 0 ? "入庫" : "出庫",
                     amount: Math.abs(change),
                     timestamp: firebase.firestore.FieldValue.serverTimestamp()
                 });
 
-                // 3. 提交
                 return batch.commit();
             }).then(() => {
-                console.log("更新成功");
-                if (navigator.vibrate) navigator.vibrate([50, 50]); // 成功雙震動
-            }).catch((err) => {
-                alert("錯誤: " + err.message);
-            }).finally(() => {
-                isProcessing = false; // 解鎖
-            });
+                if (navigator.vibrate) navigator.vibrate([50, 50]);
+            }).catch((err) => alert("錯誤: " + err.message))
+              .finally(() => isProcessing = false);
         }
 
-        // --- 3. 更新商品名稱 ---
         function updateProductName() {
             if(!currentId) return;
             const newName = document.getElementById('res-name').value;
-            db.collection("inventory").doc(currentId).set({ name: newName }, { merge: true });
+            db.collection("inventory").doc(currentId).set({ name: newName, id: currentId }, { merge: true });
         }
 
-        // --- 4. 生成 QR Code ---
+        // --- 3. 生成 QR Code ---
         function makeQR() {
             const text = document.getElementById('new-code').value;
             if (!text) return alert("請輸入編號");
-            const div = document.getElementById('qrcode');
-            div.innerHTML = "";
-            new QRCode(div, { text: text, width: 150, height: 150 });
+            document.getElementById('qrcode').innerHTML = "";
+            new QRCode(document.getElementById('qrcode'), { text: text, width: 150, height: 150 });
         }
 
-        // --- 5. 監聽紀錄 (即時列表) ---
-        // 注意：如果你看到 Console 報錯 Requires Index，請點擊連結建立索引
-        db.collection("logs")
-          .orderBy("timestamp", "desc")
-          .limit(20)
-          .onSnapshot((snapshot) => {
+        // --- 4. 監聽庫存總表 (新功能) ---
+        db.collection("inventory").onSnapshot((snapshot) => {
+            allInventoryData = []; // 清空暫存
+            snapshot.forEach(doc => {
+                const d = doc.data();
+                // 確保有 ID 欄位 (舊資料可能沒有，用 doc.id 補)
+                allInventoryData.push({ 
+                    id: doc.id, 
+                    name: d.name || "未命名", 
+                    qty: d.qty || 0 
+                });
+            });
+            renderInventoryList(allInventoryData);
+        });
+
+        // 渲染列表函式
+        function renderInventoryList(data) {
+            const list = document.getElementById('inventory-full-list');
+            list.innerHTML = "";
+            
+            if(data.length === 0) {
+                list.innerHTML = "<li style='text-align:center; padding:20px; color:#999;'>暫無庫存資料</li>";
+                return;
+            }
+
+            data.forEach(item => {
+                // 如果數量小於 5，顯示紅色警示
+                const qtyClass = item.qty < 5 ? "item-qty low" : "item-qty";
+                
+                list.innerHTML += `
+                <li class="list-item">
+                    <div class="item-info">
+                        <div class="item-name">${item.name}</div>
+                        <div class="item-id">${item.id}</div>
+                    </div>
+                    <div class="${qtyClass}">${item.qty}</div>
+                </li>`;
+            });
+        }
+
+        // 搜尋過濾功能
+        function filterInventory() {
+            const keyword = document.getElementById('search-input').value.toLowerCase();
+            const filtered = allInventoryData.filter(item => 
+                item.id.toLowerCase().includes(keyword) || 
+                item.name.toLowerCase().includes(keyword)
+            );
+            renderInventoryList(filtered);
+        }
+
+        // --- 5. 監聽紀錄 ---
+        db.collection("logs").orderBy("timestamp", "desc").limit(20).onSnapshot((snapshot) => {
               const list = document.getElementById('log-list-container');
               list.innerHTML = "";
               snapshot.forEach(doc => {
                   const d = doc.data();
-                  const time = d.timestamp ? new Date(d.timestamp.toDate()).toLocaleString() : "剛剛";
-                  const badgeClass = d.action === "入庫" ? "badge-in" : "badge-out";
+                  const time = d.timestamp ? new Date(d.timestamp.toDate()).toLocaleString([], {hour: '2-digit', minute:'2-digit', month:'2-digit', day:'2-digit'}) : "剛剛";
+                  const color = d.action === "入庫" ? "color:var(--success)" : "color:var(--danger)";
                   
                   list.innerHTML += `
-                    <li class="log-item">
-                        <div>
-                            <div style="font-weight:600;">${d.productName} <span style="font-size:0.8em; color:#888;">(${d.productId})</span></div>
-                            <div class="log-time">${time}</div>
+                    <li class="list-item">
+                        <div class="item-info">
+                            <div class="item-name">${d.productName}</div>
+                            <div class="item-id">${time}</div>
                         </div>
-                        <div class="log-action">
-                            <span class="${badgeClass}">${d.action}</span> 
-                            ${d.amount}
+                        <div style="font-weight:bold; ${color}">
+                            ${d.action === "入庫" ? "+" : "-"}${d.amount}
                         </div>
                     </li>`;
               });
-          });
+        });
 
-        // --- UI 切換邏輯 ---
+        // --- UI 切換 ---
         function switchTab(tabName) {
-            ['scan', 'logs', 'create'].forEach(t => {
+            ['scan', 'list', 'logs', 'create'].forEach(t => {
                 document.getElementById('tab-' + t).style.display = (t === tabName) ? 'block' : 'none';
             });
             document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
