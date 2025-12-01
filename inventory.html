@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>簡易 QR Code 庫存系統</title>
+    <title>雲端即時庫存系統</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
@@ -11,148 +15,147 @@
         body { font-family: 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
         h2 { text-align: center; color: #333; }
         .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        
-        /* 掃描區域樣式 */
         #reader { width: 100%; border-radius: 8px; overflow: hidden; }
-        
-        /* 按鈕樣式 */
         button { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 5px; }
-        .btn-in { background-color: #4CAF50; color: white; } /* 入庫綠色 */
-        .btn-out { background-color: #f44336; color: white; } /* 出庫紅色 */
-        .btn-gen { background-color: #2196F3; color: white; } /* 生成藍色 */
-        
+        .btn-in { background-color: #4CAF50; color: white; }
+        .btn-out { background-color: #f44336; color: white; }
+        .btn-gen { background-color: #2196F3; color: white; }
         input { padding: 10px; width: 70%; border: 1px solid #ddd; border-radius: 5px; }
-        
-        /* 隱藏/顯示控制 */
         .hidden { display: none; }
-        
         #scan-result { margin-top: 15px; padding: 15px; background: #e3f2fd; border-radius: 5px; text-align: center; }
         #stock-display { font-size: 24px; font-weight: bold; color: #333; }
         #qrcode-container { margin-top: 15px; display: flex; justify-content: center; }
+        ul { padding-left: 20px; }
+        li { margin-bottom: 5px; color: #555; }
+        .status-dot { height: 10px; width: 10px; background-color: #bbb; border-radius: 50%; display: inline-block; margin-right: 5px;}
+        .status-online { background-color: #4CAF50; }
     </style>
 </head>
 <body>
 
-    <h2>📦 貨物掃碼管理系統</h2>
+    <h2>📦 雲端庫存系統 <span id="status" class="status-dot"></span></h2>
 
     <div class="card">
         <h3>1. 掃描貨物</h3>
         <div id="reader"></div>
         <div id="scan-result" class="hidden">
-            <p>識別商品：<b id="product-id">---</b></p>
-            <p>目前庫存：<span id="stock-display">0</span></p>
+            <p>商品 ID：<b id="product-id">---</b></p>
+            <p>雲端庫存：<span id="stock-display">讀取中...</span></p>
             <hr>
-            <p>操作：</p>
-            <button class="btn-in" onclick="updateStock(1)">+ 入庫 (進貨)</button>
-            <button class="btn-out" onclick="updateStock(-1)">- 出庫 (發貨)</button>
+            <button class="btn-in" onclick="updateCloudStock(1)">+ 入庫</button>
+            <button class="btn-out" onclick="updateCloudStock(-1)">- 出庫</button>
         </div>
     </div>
 
     <div class="card">
         <h3>2. 製作新標籤</h3>
-        <input type="text" id="new-item-name" placeholder="輸入商品名稱 (如: A-001)">
+        <input type="text" id="new-item-name" placeholder="輸入商品 ID (如: PROD-888)">
         <button class="btn-gen" onclick="generateQR()">生成 QR Code</button>
         <div id="qrcode-container"></div>
     </div>
 
     <div class="card">
-        <h3>3. 所有庫存清單 (模擬資料庫)</h3>
-        <ul id="inventory-list"></ul>
+        <h3>3. 即時庫存清單</h3>
+        <p style="font-size:12px; color:#888;">* 這裡的數據會自動同步</p>
+        <ul id="inventory-list"><li>正在連線至 Firebase...</li></ul>
     </div>
 
     <script>
-        // --- 模擬資料庫 (使用 LocalStorage) ---
-        // 實際開發時，這裡會替換成你的 Firebase 程式碼
-        const defaultData = {
-            'PROD-001': { name: 'PROD-001', qty: 50 },
-            'PROD-002': { name: 'PROD-002', qty: 120 }
+        // --- 1. Firebase 設定 (已填入你的資料) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyAUgk7DGfnCCt1-cTAhvD2Se4YZQEoXUE8",
+            authDomain: "qr-inventory-2e995.firebaseapp.com",
+            projectId: "qr-inventory-2e995",
+            storageBucket: "qr-inventory-2e995.firebasestorage.app",
+            messagingSenderId: "1041449207118",
+            appId: "1:1041449207118:web:d8c66fa15024471f0d0a1f",
+            measurementId: "G-YGQYMSS6E3"
         };
 
-        // 讀取資料庫
-        function getDB() {
-            const data = localStorage.getItem('myInventory');
-            return data ? JSON.parse(data) : defaultData;
-        }
+        // 初始化 Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
 
-        // 儲存資料庫
-        function saveDB(data) {
-            localStorage.setItem('myInventory', JSON.stringify(data));
-            renderList();
-        }
+        // 檢查連線狀態
+        document.getElementById('status').classList.add('status-online');
+        console.log("Firebase 連線成功！");
 
+        // --- 2. 監聽資料庫變化 (Real-time Listener) ---
+        // 只要雲端資料一變，這裡馬上自動執行，更新列表
+        db.collection("inventory").onSnapshot((querySnapshot) => {
+            const list = document.getElementById('inventory-list');
+            list.innerHTML = ""; // 清空舊列表
+
+            querySnapshot.forEach((doc) => {
+                const data = doc.data();
+                const li = document.createElement('li');
+                li.innerHTML = `<b>${doc.id}</b> : ${data.qty} 個`;
+                list.appendChild(li);
+                
+                // 如果目前正在看這個商品，順便更新上方的顯示數字
+                if (currentScannedId === doc.id) {
+                    document.getElementById('stock-display').innerText = data.qty;
+                }
+            });
+
+            if(querySnapshot.empty){
+                list.innerHTML = "<li>目前無資料，請先掃描或新增。</li>";
+            }
+        });
+
+        // --- 3. 掃碼邏輯 ---
         let currentScannedId = null;
+        const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
 
-        // --- 核心功能 1: 掃描設定 ---
-        const html5QrcodeScanner = new Html5QrcodeScanner(
-            "reader", { fps: 10, qrbox: 250 });
-
-        function onScanSuccess(decodedText, decodedResult) {
-            // 掃描成功後的動作
+        function onScanSuccess(decodedText) {
             currentScannedId = decodedText;
-            
-            // 顯示操作介面
             document.getElementById('scan-result').classList.remove('hidden');
             document.getElementById('product-id').innerText = decodedText;
-            
-            // 讀取該商品的庫存
-            const db = getDB();
-            if (!db[decodedText]) {
-                // 如果是新商品，初始化為 0
-                db[decodedText] = { name: decodedText, qty: 0 };
-                saveDB(db);
-            }
-            document.getElementById('stock-display').innerText = db[decodedText].qty;
-            
-            // 暫停掃描 (避免一直重複觸發)
-            // html5QrcodeScanner.pause(); 
-            // 這裡為了演示方便不暫停，實際使用建議暫停或顯示掃描成功提示
-        }
 
+            // 查詢這個商品是否存在
+            const docRef = db.collection("inventory").doc(decodedText);
+            docRef.get().then((doc) => {
+                if (doc.exists) {
+                    document.getElementById('stock-display').innerText = doc.data().qty;
+                } else {
+                    document.getElementById('stock-display').innerText = "新商品 (0)";
+                    // 自動建立這個新商品檔案，預設 0
+                    docRef.set({ qty: 0 }); 
+                }
+            }).catch((error) => {
+                console.error("讀取錯誤:", error);
+                alert("讀取失敗，請確認你的 Firebase 有開啟 Test Mode");
+            });
+        }
+        
         html5QrcodeScanner.render(onScanSuccess);
 
-        // --- 核心功能 2: 更新庫存 (入庫/出庫) ---
-        function updateStock(change) {
+        // --- 4. 更新庫存 (寫入資料庫) ---
+        function updateCloudStock(change) {
             if (!currentScannedId) return;
 
-            const db = getDB();
-            if (db[currentScannedId]) {
-                db[currentScannedId].qty += change;
-                // 更新畫面
-                document.getElementById('stock-display').innerText = db[currentScannedId].qty;
-                saveDB(db); // 存入 LocalStorage
-            }
+            const docRef = db.collection("inventory").doc(currentScannedId);
+            
+            // 使用 increment 確保多人同時操作也不會算錯
+            docRef.update({
+                qty: firebase.firestore.FieldValue.increment(change)
+            }).catch((error) => {
+                console.error("更新失敗:", error);
+                alert("更新失敗！請檢查網路或權限。");
+            });
         }
 
-        // --- 核心功能 3: 生成 QR Code ---
+        // --- 5. 生成 QR Code ---
         function generateQR() {
             const text = document.getElementById('new-item-name').value;
-            if (!text) return alert("請輸入商品名稱");
-
-            const container = document.getElementById('qrcode-container');
-            container.innerHTML = ""; // 清空舊的
-            
-            new QRCode(container, {
+            if (!text) return alert("請輸入商品 ID");
+            document.getElementById('qrcode-container').innerHTML = "";
+            new QRCode(document.getElementById('qrcode-container'), {
                 text: text,
                 width: 128,
                 height: 128
             });
         }
-
-        // --- 輔助: 渲染列表 ---
-        function renderList() {
-            const list = document.getElementById('inventory-list');
-            const db = getDB();
-            list.innerHTML = "";
-            for (let key in db) {
-                const item = db[key];
-                const li = document.createElement('li');
-                li.textContent = `${item.name} : 庫存 ${item.qty}`;
-                list.appendChild(li);
-            }
-        }
-
-        // 初始化
-        renderList();
     </script>
 </body>
 </html>
