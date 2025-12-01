@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>智慧庫存系統 FINAL - FIX</title>
+    <title>智慧庫存系統 Production</title>
     
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
@@ -30,7 +30,8 @@
         .status-dot.online { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
 
         /* Main Content */
-        main { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 15px; padding-bottom: 90px; }
+        main { flex: 1; overflow-y: hidden; /* R1 Fix: 預設禁止捲動 */
+               overflow-x: hidden; padding: 15px; padding-bottom: 90px; }
         .card { background: var(--card); border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
 
         /* Fixed Nav */
@@ -75,15 +76,8 @@
         #detail-modal.active .modal-content {
             transform: translateY(0);
         }
-        .modal-header { background: var(--primary); color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; }
-        .modal-body { padding: 15px; overflow-y: auto; flex: 1; }
-        .modal-close-btn { background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; }
-
-        .detail-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
-        .detail-label { font-size: 0.9rem; color: #64748b; margin-bottom: 5px; }
-        .history-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #e2e8f0; }
-        .history-item:last-child { border-bottom: none; }
-        .history-time { font-size: 0.8rem; color: #94a3b8; }
+        /* R4: 製碼區域置中 */
+        .qrcode-container { display: flex; justify-content: center; background: white; padding: 15px; border-radius: 12px; margin-top: 15px; }
     </style>
 </head>
 <body>
@@ -94,7 +88,7 @@
         <div id="status-light" class="status-dot"></div>
     </header>
 
-    <main>
+    <main id="main-content-scroll">
         <div id="view-scan">
             <div class="card" style="padding:0; margin-bottom: 10px;">
                 <div id="camera-wrapper">
@@ -144,7 +138,7 @@
                 <h3>🖨️ 製作標籤</h3>
                 <input type="text" id="new-code" placeholder="輸入編號 (如: A-001)">
                 <button class="btn btn-gen" onclick="makeQR()">生成 QR Code</button>
-                <div id="qrcode" style="margin-top:20px; display:flex; justify-content:center;"></div>
+                <div class="qrcode-container" id="qrcode"></div>
             </div>
         </div>
     </main>
@@ -198,11 +192,13 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
-    const ServerTimestamp = firebase.firestore.FieldValue.serverTimestamp(); // 優化點: 統一使用伺服器時間
+    const ServerTimestamp = firebase.firestore.FieldValue.serverTimestamp();
     
     let html5QrCode; let currentId = null; let isProcessing = false; let allData = [];
 
-    // --- 啟動函式 ---
+    function vibrate(p) { if(navigator.vibrate) navigator.vibrate(p); }
+
+    // --- 相機控制 ---
     function startCamera() {
         if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
         html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 }, (text) => {
@@ -211,7 +207,6 @@
     }
     function stopCamera() { if (html5QrCode && html5QrCode.isScanning) html5QrCode.stop(); }
 
-    // --- 掃描與入出庫邏輯 ---
     function fetchData(id) {
         document.getElementById('scan-result').style.display = 'block';
         document.getElementById('res-id').innerText = id;
@@ -283,10 +278,39 @@
         }).join('');
     }
 
+    // --- 紀錄頁面 (R3 Fix: 簡化查詢) ---
+    db.collection("logs").orderBy("timestamp", "desc").onSnapshot(snap => {
+        const container = document.getElementById('logs-container');
+        container.innerHTML = "";
+        
+        if (snap.empty) {
+            return container.innerHTML = "<div style='text-align:center; padding:20px; color:#94a3b8;'>無歷史紀錄</div>";
+        }
+
+        snap.forEach(doc => {
+            const d = doc.data();
+            // 由於 ServerTimestamp 可能需要時間同步，這裡使用更安全的轉換
+            const time = d.timestamp?.toDate ? d.timestamp.toDate().toLocaleString() : '處理中...';
+            const color = d.action.includes('入庫') ? 'var(--success)' : 'var(--danger)';
+            const actionText = d.action.includes('手動') ? d.action : d.action;
+
+            container.innerHTML += `
+                <div class="list-item">
+                    <div style="flex:1;">
+                        <div style="font-weight:600">${d.productName}</div>
+                        <div style="font-size:0.75rem; color:#94a3b8;">${time}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <span style="color:${color}; font-weight:bold;">${actionText} ${d.amount}</span>
+                    </div>
+                </div>
+            `;
+        });
+    });
+
     // --- 商品詳情與編輯 (Bug Fix 2) ---
     function showDetail(id) {
         document.getElementById('detail-modal').style.display = 'flex';
-        // 使用 classList.add 觸發動畫
         setTimeout(() => document.getElementById('detail-modal').classList.add('active'), 10);
         document.body.style.overflow = 'hidden';
 
@@ -303,7 +327,7 @@
             document.getElementById('detail-qty-input').setAttribute('data-item-id', id);
         });
         
-        // Bug Fix 2: 歷史紀錄的錯誤處理
+        // Bug Fix 2 (R5): 歷史紀錄的錯誤處理
         db.collection("logs").where("productId", "==", id).orderBy("timestamp", "desc").limit(30).get().then(snapshot => {
             const list = document.getElementById('detail-history-list');
             list.innerHTML = "";
@@ -312,7 +336,7 @@
             snapshot.forEach(doc => {
                 const d = doc.data();
                 const time = d.timestamp ? d.timestamp.toDate().toLocaleString() : '---';
-                const color = d.action === '入庫' || d.action === '手動入庫' ? 'var(--success)' : 'var(--danger)';
+                const color = d.action.includes('入庫') ? 'var(--success)' : 'var(--danger)';
                 list.innerHTML += `
                     <li class="history-item">
                         <span class="history-time">${time}</span>
@@ -325,23 +349,80 @@
             const list = document.getElementById('detail-history-list');
             list.innerHTML = `<li style="color:var(--danger); padding:20px;">
                 🚨 **載入紀錄失敗！** <br> 
-                **請務必處理：** 請檢查你的瀏覽器 Console 中是否有紅字錯誤，並點擊 Firestore 提供的連結 **建立複合索引** (Collection: logs, Fields: productId(Asc), timestamp(Desc))。
+                原因：需要建立複合索引 (productId/timestamp)。
             </li>`;
         });
     }
 
-    function updateDetailQty() { /* ... (Logic remains the same) ... */ }
-    function updateDetailInfo(field) { /* ... (Logic remains the same) ... */ }
+    // Bug Fix 2: 修正手動調整邏輯
+    function updateDetailQty() {
+        const inputEl = document.getElementById('detail-qty-input');
+        const id = inputEl.getAttribute('data-item-id');
+        const newQty = parseInt(inputEl.value);
+        
+        if (!id || isProcessing) return;
+        if (isNaN(newQty) || newQty < 0) return alert("數量必須是正數或零");
+        
+        vibrate([30]); isProcessing = true;
+        
+        db.collection('inventory').doc(id).get().then(doc => {
+            const oldQty = doc.data()?.qty || 0;
+            const diff = newQty - oldQty;
+            
+            if (diff === 0) {
+                alert("數量未變更");
+                return false; // 返回 false 阻止 commit
+            }
+
+            const action = diff > 0 ? "手動入庫" : "手動出庫";
+            const amount = Math.abs(diff);
+
+            const batch = db.batch();
+            
+            // 1. 更新庫存
+            batch.update(doc.ref, { 
+                qty: newQty, 
+                updatedAt: ServerTimestamp 
+            });
+
+            // 2. 寫入 Log
+            const logRef = db.collection("logs").doc();
+            batch.set(logRef, { 
+                productId: id, productName: document.getElementById('detail-name').value, 
+                action: action, amount: amount, timestamp: ServerTimestamp 
+            });
+
+            return batch.commit(); // 執行批次操作
+        }).then((result) => {
+            // 如果 result 是 false (數量未變更), 則不執行震動和刷新
+            if (result !== false) { 
+                vibrate([50, 50, 50]);
+                alert("庫存調整成功！");
+                showDetail(id); // 刷新紀錄列表
+            }
+        }).catch(err => {
+            console.error("Manual Adjust Error:", err);
+            alert("調整失敗，請檢查網路或權限。");
+        }).finally(() => {
+            isProcessing = false;
+        });
+    }
+
+    function updateDetailInfo(field) { 
+        const id = document.getElementById('detail-qty-input').getAttribute('data-item-id');
+        const value = document.getElementById(`detail-${field}`).value;
+        if(id) db.collection("inventory").doc(id).update({ [field]: value, updatedAt: ServerTimestamp });
+    }
 
     function closeDetail() {
         document.getElementById('detail-modal').classList.remove('active');
         setTimeout(() => document.getElementById('detail-modal').style.display = 'none', 300); 
-        document.body.style.overflow = '';
+        document.body.style.overflow = 'auto'; // R1 Fix: 恢復背景捲動
     }
 
     // --- 輔助功能 ---
-    // Bug Fix 1: 修正製碼按鈕 (確保 QRCode 函式可用)
     function makeQR() {
+        vibrate([50]); // R4 Fix: 按鈕震動
         const text = document.getElementById('new-code').value;
         if(!text) return;
         document.getElementById('qrcode').innerHTML = "";
@@ -352,42 +433,39 @@
         }
     }
 
+    // R1 Fix: 修正頁面切換邏輯
     function switchView(view) {
         ['scan', 'list', 'logs', 'create'].forEach(v => document.getElementById('view-'+v).style.display = (v===view)?'block':'none');
         document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-        // 注意：這裡使用 event.currentTarget 來確定是哪個按鈕被點擊
-        // 為了在沒有 event 的情況下也能啟動，我們需要在初始化時提供一個預設值
-        const targetButton = event ? event.currentTarget : document.querySelector('.nav-btn[onclick*="scan"]');
-        if (targetButton) {
-            targetButton.classList.add('active');
-        }
+        event.currentTarget.classList.add('active');
 
-        if(view === 'scan') setTimeout(startCamera, 300); else stopCamera();
+        // R1 Fix: 動態切換主內容區的捲動
+        const mainContent = document.getElementById('main-content-scroll');
+        if (view === 'scan') {
+            mainContent.style.overflowY = 'hidden';
+            setTimeout(startCamera, 300);
+        } else {
+            mainContent.style.overflowY = 'auto'; // 允許列表頁捲動
+            stopCamera();
+        }
     }
     
     function filterList() { /* ... (Logic remains the same) ... */ }
     function exportToExcel() { /* ... (Logic remains the same) ... */ }
-    function vibrate(p) { if(navigator.vibrate) navigator.vibrate(p); }
 
-    // ★★★ 核心修復：使用 DOMContentLoaded 確保所有資源載入後才啟動 ★★★
+    // ★★★ 核心修復：確保所有資源載入後才啟動 ★★★
     document.addEventListener('DOMContentLoaded', () => {
-        // 1. 設置初始狀態為 'scan' 頁面並啟動相機
+        // 初始狀態：設置初始狀態為 'scan' 頁面並啟動相機
         document.getElementById('view-scan').style.display = 'block';
         document.querySelector('.nav-btn[onclick*="scan"]').classList.add('active');
         startCamera();
         
-        // 2. 移除 Nav 上的 inline onclicks，改用事件代理 (確保不會因為 crash 失敗)
+        // 修復 Nav 上的 inline onclicks 在 crash 後的失效問題
         document.querySelector('nav').addEventListener('click', (e) => {
             const btn = e.target.closest('.nav-btn');
-            if (btn) {
-                const viewName = btn.getAttribute('onclick').match(/'(.*?)'/)[1];
-                if (viewName) {
-                    // 模擬 switchView 的邏輯，但從 event 啟動
-                    ['scan', 'list', 'logs', 'create'].forEach(v => document.getElementById('view-'+v).style.display = (v===viewName)?'block':'none');
-                    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    if(viewName === 'scan') setTimeout(startCamera, 300); else stopCamera();
-                }
+            if (btn && btn.getAttribute('onclick')) {
+                // 執行原本的 onclick 屬性內容
+                eval(btn.getAttribute('onclick'));
             }
         });
     });
