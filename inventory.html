@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>終極庫存系統 V5.0 - 權限管理版</title>
+    <title>終極庫存系統 V4.1 - 權限管理版</title>
     
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -126,7 +126,8 @@
             }
             
             // 使用 public 集合儲存角色信息，方便管理員設定
-            const rolePath = `/artifacts/${appId}/public/user_roles`;
+            // FIX: 修正公共資料路徑為 6 segments: artifacts/{appId}/public/data/user_roles/{uid}
+            const rolePath = `artifacts/${appId}/public/data/user_roles`;
             const roleRef = doc(db, rolePath, uid);
 
             try {
@@ -728,7 +729,7 @@
 <div class="app-wrapper">
     <!-- Header -->
     <header class="flex-shrink-0 bg-indigo-700 text-white p-4 flex justify-between items-center shadow-lg">
-        <h1 class="text-xl font-bold tracking-wider">📦 終極庫存系統 V5.0</h1>
+        <h1 class="text-xl font-bold tracking-wider">📦 終極庫存系統 V4.1</h1>
         <div class="flex items-center space-x-3">
             <div class="text-xs text-right">
                 <span id="role-display" class="font-bold block">角色: 載入中...</span>
@@ -973,9 +974,7 @@
 </div>
 
 <!-- 登入模態框 (用於管理員登入) -->
-<div id="login-modal" class="fixed inset-0 z-[100] bg-black bg-opacity-80 transit
-    
-    ion-opacity duration-300 opacity-0 pointer-events-none flex justify-center items-center" onclick="if(event.target.id === 'login-modal') closeLoginModal()">
+<div id="login-modal" class="fixed inset-0 z-[100] bg-black bg-opacity-80 transition-opacity duration-300 opacity-0 pointer-events-none flex justify-center items-center" onclick="if(event.target.id === 'login-modal') closeLoginModal()">
     <div id="login-modal-content" class="bg-white w-full max-w-sm rounded-xl shadow-2xl flex flex-col transition-transform duration-300 translate-y-full p-6 space-y-4">
         <h2 class="text-2xl font-bold text-indigo-700 text-center">🔐 管理員登入</h2>
         <p class="text-sm text-gray-600 text-center">請輸入您的電子郵件和密碼以獲取管理權限。</p>
@@ -1013,4 +1012,3 @@
 
 </body>
 </html>
-
